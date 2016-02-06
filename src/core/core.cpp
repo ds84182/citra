@@ -30,6 +30,9 @@ void RunLoop(int tight_loop) {
         // Disable the CPU (and GDB) while CiTrace is playing a file
         CiTrace::g_player->Run(tight_loop);
 
+        CoreTiming::Idle();
+        CoreTiming::Advance();
+
         HW::Update();
 
         return;
