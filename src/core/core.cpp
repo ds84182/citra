@@ -28,7 +28,7 @@ std::unique_ptr<ARM_Interface> g_sys_core; ///< ARM11 system (OS) core
 void RunLoop(int tight_loop) {
     if (CiTrace::g_playback) {
         // Disable the CPU (and GDB) while CiTrace is playing a file
-        // CiTrace::g_player->Run(tight_loop);
+        CiTrace::g_player->Run(tight_loop);
 
         HW::Update();
 
