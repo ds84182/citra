@@ -9,10 +9,19 @@
 #include "common/logging/log.h"
 #include "common/make_unique.h"
 
+#include "core/hle/kernel/memory.h"
+#include "core/hle/kernel/process.h"
+#include "core/hle/kernel/resource_limit.h"
+
 #include "core/tracer/citrace.h"
 #include "core/tracer/player.h"
 
+#include "core/memory.h"
+
 #include "citrace.h"
+
+using Kernel::SharedPtr;
+using Kernel::CodeSet;
 
 namespace Loader {
 
@@ -31,6 +40,7 @@ static bool LoadFile(FileUtil::IOFile& file) {
     if (file.ReadBytes(trace_data.data(), size) != size)
         return false;
 
+    //TODO: Validate header version
     CiTrace::g_player = Common::make_unique<CiTrace::Player>(trace_data);
     CiTrace::g_playback = true;
 
@@ -58,6 +68,16 @@ ResultStatus AppLoader_CITRACE::Load() {
 
     if (!LoadFile(file))
         return ResultStatus::Error;
+
+    SharedPtr<CodeSet> codeset = CodeSet::Create("citrace", 0);
+    Kernel::g_current_process = Kernel::Process::Create(std::move(codeset));
+    Kernel::g_current_process->svc_access_mask.set();
+    Kernel::g_current_process->address_mappings = default_address_mappings;
+
+    // Attach the default resource limit (APPLICATION) to the process
+    Kernel::g_current_process->resource_limit = Kernel::ResourceLimit::GetForCategory(Kernel::ResourceLimitCategory::APPLICATION);
+    Kernel::g_current_process->memory_region = GetMemoryRegion(Kernel::g_current_process->flags.memory_region);
+    Kernel::g_current_process->LinearAllocate(Memory::LINEAR_HEAP_VADDR, Kernel::g_current_process->memory_region->size, Kernel::VMAPermission::ReadWrite);
 
     is_loaded = true;
     return ResultStatus::Success;
