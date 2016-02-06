@@ -9,7 +9,10 @@
 #include "common/logging/log.h"
 
 #include "core/hw/gpu.h"
+#include "core/hw/lcd.h"
 #include "core/memory.h"
+
+#include "video_core/pica.h"
 
 #include "player.h"
 
@@ -41,6 +44,14 @@ void Player::Run(u32 tight_loop) {
     // Reset GPU Registers
     ASSERT_MSG(initial->gpu_registers_size == sizeof(GPU::g_regs)/sizeof(u32), "GPU Register Size Mismatch!");
     std::memcpy(&GPU::g_regs, GetOffset<const GPU::Regs*>(trace_data, initial->gpu_registers), sizeof(GPU::g_regs));
+
+    // Reset LCD Registers
+    ASSERT_MSG(initial->lcd_registers_size == sizeof(LCD::g_regs)/sizeof(u32), "LCD Register Size Mismatch!");
+    std::memcpy(&LCD::g_regs, GetOffset<const LCD::Regs*>(trace_data, initial->lcd_registers), sizeof(LCD::g_regs));
+
+    // Reset Pica Registers
+    ASSERT_MSG(initial->pica_registers_size == sizeof(Pica::g_state.regs)/sizeof(u32), "Pica Register Size Mismatch!");
+    std::memcpy(&Pica::g_state.regs, GetOffset<const Pica::Regs*>(trace_data, initial->pica_registers), sizeof(Pica::g_state.regs));
 
     auto stream = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset);
     auto stream_end = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset+(header->stream_size-1)*sizeof(CTStreamElement));
