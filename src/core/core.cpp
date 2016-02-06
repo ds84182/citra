@@ -17,6 +17,7 @@
 #include "core/hw/hw.h"
 
 #include "core/gdbstub/gdbstub.h"
+#include "core/tracer/player.h"
 
 namespace Core {
 
@@ -25,6 +26,15 @@ std::unique_ptr<ARM_Interface> g_sys_core; ///< ARM11 system (OS) core
 
 /// Run the core CPU loop
 void RunLoop(int tight_loop) {
+    if (CiTrace::g_playback) {
+        // Disable the CPU (and GDB) while CiTrace is playing a file
+        // CiTrace::g_player->Run(tight_loop);
+
+        HW::Update();
+
+        return;
+    }
+
     if (GDBStub::g_server_enabled) {
         GDBStub::HandlePacket();
 

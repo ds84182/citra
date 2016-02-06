@@ -13,6 +13,7 @@
 #include "video_core/video_core.h"
 
 #include "core/gdbstub/gdbstub.h"
+#include "core/tracer/player.h"
 
 namespace System {
 
@@ -25,9 +26,11 @@ void Init(EmuWindow* emu_window) {
     HLE::Init();
     VideoCore::Init(emu_window);
     GDBStub::Init();
+    CiTrace::Player::Init();
 }
 
 void Shutdown() {
+    CiTrace::Player::Shutdown();
     GDBStub::Shutdown();
     VideoCore::Shutdown();
     HLE::Shutdown();

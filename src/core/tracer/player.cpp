@@ -11,4 +11,13 @@ namespace CiTrace {
 std::unique_ptr<Player> g_player;
 bool g_playback = false;
 
+void Player::Init() {
+    g_playback = false;
+}
+
+void Player::Shutdown() {
+    g_player.reset();
+    g_playback = false;
+}
+
 }

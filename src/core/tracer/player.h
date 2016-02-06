@@ -16,6 +16,9 @@ class Player {
 public:
     Player(std::vector<u8> data) :
         trace_data(std::move(data)) {};
+
+    static void Init();
+    static void Shutdown();
 private:
     std::vector<u8> trace_data;
 };
