@@ -31,6 +31,7 @@ enum class FileType {
     CIA,
     ELF,
     THREEDSX, //3DSX
+    CITRACE,
 };
 
 /**

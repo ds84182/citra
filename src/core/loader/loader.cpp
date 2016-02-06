@@ -13,6 +13,7 @@
 #include "core/hle/kernel/process.h"
 #include "core/hle/service/fs/archive.h"
 #include "core/loader/3dsx.h"
+#include "core/loader/citrace.h"
 #include "core/loader/elf.h"
 #include "core/loader/ncch.h"
 
@@ -37,6 +38,7 @@ FileType IdentifyFile(FileUtil::IOFile& file) {
     CHECK_TYPE(THREEDSX)
     CHECK_TYPE(ELF)
     CHECK_TYPE(NCCH)
+    CHECK_TYPE(CITRACE)
 
 #undef CHECK_TYPE
 
@@ -68,6 +70,9 @@ FileType GuessFromExtension(const std::string& extension_) {
     if (extension == ".3dsx")
         return FileType::THREEDSX;
 
+    if (extension == ".ctf")
+        return FileType::CITRACE;
+
     return FileType::Unknown;
 }
 
@@ -83,6 +88,8 @@ const char* GetFileTypeString(FileType type) {
         return "ELF";
     case FileType::THREEDSX:
         return "3DSX";
+    case FileType::CITRACE:
+        return "CITRACE";
     case FileType::Error:
     case FileType::Unknown:
         break;
@@ -143,6 +150,10 @@ ResultStatus LoadFile(const std::string& filename) {
         }
         break;
     }
+
+    // CiTrace recording...
+    case FileType::CITRACE:
+        return AppLoader_CITRACE(std::move(file), filename_filename).Load();
 
     // CIA file format...
     case FileType::CIA:

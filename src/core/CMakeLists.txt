@@ -113,10 +113,12 @@ set(SRCS
             hw/lcd.cpp
             hw/y2r.cpp
             loader/3dsx.cpp
+            loader/citrace.cpp
             loader/elf.cpp
             loader/loader.cpp
             loader/ncch.cpp
             tracer/recorder.cpp
+            tracer/player.cpp
             memory.cpp
             settings.cpp
             system.cpp
@@ -243,9 +245,11 @@ set(HEADERS
             hw/lcd.h
             hw/y2r.h
             loader/3dsx.h
+            loader/citrace.h
             loader/elf.h
             loader/loader.h
             loader/ncch.h
+            tracer/player.h
             tracer/recorder.h
             tracer/citrace.h
             memory.h
