@@ -20,4 +20,8 @@ void Player::Shutdown() {
     g_playback = false;
 }
 
+
+void Player::Run(u32 tight_loop) {
+}
+
 }

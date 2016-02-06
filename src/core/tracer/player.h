@@ -15,12 +15,16 @@ namespace CiTrace {
 class Player {
 public:
     Player(std::vector<u8> data) :
-        trace_data(std::move(data)) {};
+        trace_data(std::move(data)),
+        header(reinterpret_cast<const CTHeader*>(trace_data.data())) {};
 
     static void Init();
     static void Shutdown();
+
+    void Run(u32 tight_loop);
 private:
-    std::vector<u8> trace_data;
+    const std::vector<u8> trace_data;
+    const CTHeader* header;
 };
 
 extern std::unique_ptr<Player> g_player;
