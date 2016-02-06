@@ -53,6 +53,15 @@ void Player::Run(u32 tight_loop) {
     ASSERT_MSG(initial->pica_registers_size == sizeof(Pica::g_state.regs)/sizeof(u32), "Pica Register Size Mismatch!");
     std::memcpy(&Pica::g_state.regs, GetOffset<const Pica::Regs*>(trace_data, initial->pica_registers), sizeof(Pica::g_state.regs));
 
+    // Reset Default Attributes
+    ASSERT_MSG(initial->default_attributes_size == sizeof(Pica::g_state.vs.default_attributes));
+    auto default_attributes = GetOffset<const u32*>(trace_data, initial->default_attributes);
+    for (unsigned i = 0; i < 16; i++) {
+        for (unsigned comp = 0; comp < 3; comp++) {
+            Pica::g_state.vs.default_attributes[i][comp] = Pica::float24::FromRawFloat24(default_attributes[4 * i + comp]);
+        }
+    }
+
     auto stream = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset);
     auto stream_end = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset+(header->stream_size-1)*sizeof(CTStreamElement));
     //TODO: Out of bounds assert for header->stream_offset+header->stream_size
