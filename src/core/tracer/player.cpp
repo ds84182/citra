@@ -54,7 +54,7 @@ void Player::Run(u32 tight_loop) {
     std::memcpy(&Pica::g_state.regs, GetOffset<const Pica::Regs*>(trace_data, initial->pica_registers), sizeof(Pica::g_state.regs));
 
     // Reset Default Attributes
-    ASSERT_MSG(initial->default_attributes_size == sizeof(Pica::g_state.vs.default_attributes));
+    ASSERT_MSG(initial->default_attributes_size == 3 * 4 * 16, "Default Attributes Size Mismatch!");
     auto default_attributes = GetOffset<const u32*>(trace_data, initial->default_attributes);
     for (unsigned i = 0; i < 16; i++) {
         for (unsigned comp = 0; comp < 3; comp++) {
