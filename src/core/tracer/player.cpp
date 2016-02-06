@@ -20,14 +20,17 @@ namespace CiTrace {
 
 std::unique_ptr<Player> g_player;
 bool g_playback = false;
+static int playback_position = 0;
 
 void Player::Init() {
     g_playback = false;
+    playback_position = 0;
 }
 
 void Player::Shutdown() {
     g_player.reset();
     g_playback = false;
+    playback_position = 0;
 }
 
 template <typename T>
@@ -38,39 +41,64 @@ static T GetOffset(const std::vector<u8> &data, const u32 offset) {
 }
 
 void Player::Run(u32 tight_loop) {
-    // Reset hardware registers to initial states
-    auto initial = &header->initial_state_offsets;
+    if (playback_position >= header->stream_size)
+        playback_position = 0;
 
-    // Reset GPU Registers
-    ASSERT_MSG(initial->gpu_registers_size == sizeof(GPU::g_regs)/sizeof(u32), "GPU Register Size Mismatch!");
-    std::memcpy(&GPU::g_regs, GetOffset<const GPU::Regs*>(trace_data, initial->gpu_registers), sizeof(GPU::g_regs));
+    if (playback_position == 0) {
+        // Reset hardware registers to initial states
+        auto initial = &header->initial_state_offsets;
 
-    // Reset LCD Registers
-    ASSERT_MSG(initial->lcd_registers_size == sizeof(LCD::g_regs)/sizeof(u32), "LCD Register Size Mismatch!");
-    std::memcpy(&LCD::g_regs, GetOffset<const LCD::Regs*>(trace_data, initial->lcd_registers), sizeof(LCD::g_regs));
+        // Reset GPU Registers
+        ASSERT_MSG(initial->gpu_registers_size == sizeof(GPU::g_regs)/sizeof(u32), "GPU Register Size Mismatch!");
+        std::memcpy(&GPU::g_regs, GetOffset<const GPU::Regs*>(trace_data, initial->gpu_registers), sizeof(GPU::g_regs));
 
-    // Reset Pica Registers
-    ASSERT_MSG(initial->pica_registers_size == sizeof(Pica::g_state.regs)/sizeof(u32), "Pica Register Size Mismatch!");
-    std::memcpy(&Pica::g_state.regs, GetOffset<const Pica::Regs*>(trace_data, initial->pica_registers), sizeof(Pica::g_state.regs));
+        // Reset LCD Registers
+        ASSERT_MSG(initial->lcd_registers_size == sizeof(LCD::g_regs)/sizeof(u32), "LCD Register Size Mismatch!");
+        std::memcpy(&LCD::g_regs, GetOffset<const LCD::Regs*>(trace_data, initial->lcd_registers), sizeof(LCD::g_regs));
 
-    // Reset Default Attributes
-    ASSERT_MSG(initial->default_attributes_size == 3 * 4 * 16, "Default Attributes Size Mismatch!");
-    auto default_attributes = GetOffset<const u32*>(trace_data, initial->default_attributes);
-    for (unsigned i = 0; i < 16; i++) {
-        for (unsigned comp = 0; comp < 3; comp++) {
-            Pica::g_state.vs.default_attributes[i][comp] = Pica::float24::FromRawFloat24(default_attributes[4 * i + comp]);
+        // Reset Pica Registers
+        ASSERT_MSG(initial->pica_registers_size == sizeof(Pica::g_state.regs)/sizeof(u32), "Pica Register Size Mismatch!");
+        std::memcpy(&Pica::g_state.regs, GetOffset<const Pica::Regs*>(trace_data, initial->pica_registers), sizeof(Pica::g_state.regs));
+
+        // Reset Default Attributes
+        ASSERT_MSG(initial->default_attributes_size == 4 * 16, "Default Attributes Size Mismatch!");
+        auto default_attributes = GetOffset<const u32*>(trace_data, initial->default_attributes);
+        for (unsigned i = 0; i < 16; i++) {
+            for (unsigned comp = 0; comp < 3; comp++) {
+                Pica::g_state.vs.default_attributes[i][comp] = Pica::float24::FromRawFloat24(default_attributes[4 * i + comp]);
+            }
         }
+
+        // Reset Float Uniforms
+        ASSERT_MSG(initial->vs_float_uniforms_size == 4 * 96, "VS Float Uniforms Size Mismatch!");
+        auto float_uniforms = GetOffset<const u32*>(trace_data, initial->vs_float_uniforms);
+        for (unsigned i = 0; i < 96; i++) {
+            for (unsigned comp = 0; comp < 3; comp++) {
+                Pica::g_state.vs.uniforms.f[i][comp] = Pica::float24::FromRawFloat24(float_uniforms[4 * i + comp]);
+            }
+        }
+
+        // Reset Vertex Shader Program Binary
+        ASSERT_MSG(initial->vs_program_binary_size == Pica::g_state.vs.program_code.size(), "VS Program Code Size Mismatch!");
+        std::memcpy(&Pica::g_state.vs.program_code[0], GetOffset<const Pica::Regs*>(trace_data, initial->vs_program_binary), sizeof(u32)*Pica::g_state.vs.program_code.size());
+
+        // Reset Vertex Shader Swizzle Data
+        ASSERT_MSG(initial->vs_swizzle_data_size == Pica::g_state.vs.program_code.size(), "VS Swizzle Data Size Mismatch!");
+        std::memcpy(&Pica::g_state.vs.swizzle_data[0], GetOffset<const Pica::Regs*>(trace_data, initial->vs_swizzle_data), Pica::g_state.vs.program_code.size());
     }
 
     auto stream = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset);
+    stream += playback_position;
     auto stream_end = GetOffset<const CTStreamElement*>(trace_data, header->stream_offset+(header->stream_size-1)*sizeof(CTStreamElement));
     //TODO: Out of bounds assert for header->stream_offset+header->stream_size
+    bool frame_done = false;
 
-    while (stream <= stream_end) {
+    while ((!frame_done) && stream <= stream_end) {
         switch (stream->type) {
             case CTStreamElementType::FrameMarker:
                 LOG_INFO(Core, "Frame Marker!");
-                stream = stream_end; //exit outer loop
+                //stream = stream_end; //exit outer loop
+                frame_done = true;
                 break;
             case CTStreamElementType::MemoryLoad: {
                 LOG_INFO(Core, "Load Memory (addr %04X, size %04X)", stream->memory_load.physical_address, stream->memory_load.size);
@@ -103,7 +131,6 @@ void Player::Run(u32 tight_loop) {
                     default:
                         ASSERT_MSG(false, "Unknown Register Write Size: %02X", register_write->size);
                 }
-                //GPU::Write(vaddr, );
                 break;
             }
             default:
@@ -111,6 +138,7 @@ void Player::Run(u32 tight_loop) {
         }
 
         stream++;
+        playback_position++;
     }
 }
 
