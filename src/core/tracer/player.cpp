@@ -101,7 +101,7 @@ void Player::Run(u32 tight_loop) {
                 frame_done = true;
                 break;
             case CTStreamElementType::MemoryLoad: {
-                LOG_INFO(Core, "Load Memory (addr %04X, size %04X)", stream->memory_load.physical_address, stream->memory_load.size);
+                //LOG_INFO(Core, "Load Memory (addr %04X, size %04X)", stream->memory_load.physical_address, stream->memory_load.size);
                 u8 *dest = Memory::GetPhysicalPointer(stream->memory_load.physical_address);
                 auto source = GetOffset<const u8*>(trace_data, stream->memory_load.file_offset);
                 //TODO: Range check
@@ -113,7 +113,7 @@ void Player::Run(u32 tight_loop) {
                 u32 paddr = register_write->physical_address;
                 // paddr - IO PBase + IO VBase
                 u32 vaddr = paddr - 0x10100000 + 0x1EC00000;
-                LOG_INFO(Core, "Write Register (addr %04X size %02X val %016lX)", vaddr, register_write->size, register_write->value);
+                //LOG_INFO(Core, "Write Register (addr %04X size %02X val %016lX)", vaddr, register_write->size, register_write->value);
 
                 switch (register_write->size) {
                     case CTRegisterWrite::SIZE_8:
