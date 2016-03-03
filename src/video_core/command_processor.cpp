@@ -238,6 +238,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             PrimitiveAssembler<DebugUtils::GeometryDumper::Vertex> dumping_primitive_assembler(regs.triangle_topology.Value());
 #endif
             PrimitiveAssembler<Shader::OutputVertex> primitive_assembler(regs.triangle_topology.Value());
+            // Buffer used when making inputs for the geoshader
+            std::array<Shader::InputVertex, 2> geoshader_buffer;
+            unsigned int geoshader_index = 0;
 
             if (g_debug_context) {
                 for (int i = 0; i < 3; ++i) {
@@ -396,8 +399,29 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 #endif
                     // Send to vertex shader
                     Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
-                    Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit);
-                    AddVertex(output);
+
+                    if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
+                        if (geoshader_index == 2) {
+                            // Process Geometry Shader
+                            Shader::Input inputC = {shader_unit.regs.output};
+
+                            LOG_ERROR(HW_GPU, "TODO: Invoke geometry shader for vertex %x (index %x): (%f, %f, %f, %f; %f %f %f %f; %f %f %f %f)",
+                                      vertex, index,
+                                      geoshader_buffer[0][0].ToFloat32(), geoshader_buffer[0][1].ToFloat32(),
+                                      geoshader_buffer[0][2].ToFloat32(), geoshader_buffer[0][3].ToFloat32(),
+                                      geoshader_buffer[1][0].ToFloat32(), geoshader_buffer[1][1].ToFloat32(),
+                                      geoshader_buffer[1][2].ToFloat32(), geoshader_buffer[1][3].ToFloat32(),
+                                      inputC[0].ToFloat32(), inputC[1].ToFloat32(),
+                                      inputC[2].ToFloat32(), inputC[3].ToFloat32());
+
+                            geoshader_index = 0;
+                        } else {
+                            geoshader_buffer[geoshader_index++] = {shader_unit.regs.output};
+                        }
+                    } else {
+                        Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit);
+                        AddVertex(output);
+                    }
 
                     if (is_indexed) {
                         vertex_cache[vertex_cache_pos] = output;
