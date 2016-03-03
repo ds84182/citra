@@ -358,9 +358,10 @@ void Shutdown();
  * @param state Shader unit state, must be setup per shader and per shader unit
  * @param input Input vertex into the shader
  * @param num_attributes The number of vertex shader attributes
- * @return The output vertex, after having been processed by the vertex shader
  */
-OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attributes);
+void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attributes);
+
+OutputVertex ConvertOutputAttributes(UnitState<false>& state);
 
 /**
  * Produce debug information based on the given shader and input vertex

@@ -290,6 +290,17 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             Shader::UnitState<false> shader_unit;
             Shader::Setup(shader_unit);
 
+            const auto AddVertex = [&](Shader::OutputVertex &output) {
+                // Send to renderer
+                using Pica::Shader::OutputVertex;
+                auto AddTriangle = [](
+                        const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
+                    VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
+                };
+
+                primitive_assembler.SubmitVertex(output, AddTriangle);
+            };
+
             for (unsigned int index = 0; index < regs.num_vertices; ++index)
             {
                 // Indexed rendering doesn't use the start offset
@@ -310,8 +321,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                     for (unsigned int i = 0; i < VERTEX_CACHE_SIZE; ++i) {
                         if (vertex == vertex_cache_ids[i]) {
-                            output = vertex_cache[i];
+                            AddVertex(vertex_cache[i]);
                             vertex_cache_hit = true;
+                            //TODO: Maybe an outer continue here?
                             break;
                         }
                     }
@@ -383,7 +395,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                                                                        &geometry_dumper, _1, _2, _3));
 #endif
                     // Send to vertex shader
-                    output = Shader::Run(shader_unit, input, attribute_config.GetNumTotalAttributes());
+                    Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
+                    Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit);
+                    AddVertex(output);
 
                     if (is_indexed) {
                         vertex_cache[vertex_cache_pos] = output;
@@ -391,15 +405,6 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                         vertex_cache_pos = (vertex_cache_pos + 1) % VERTEX_CACHE_SIZE;
                     }
                 }
-
-                // Send to renderer
-                using Pica::Shader::OutputVertex;
-                auto AddTriangle = [](
-                        const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
-                    VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
-                };
-
-                primitive_assembler.SubmitVertex(output, AddTriangle);
             }
 
             for (auto& range : memory_accesses.ranges) {

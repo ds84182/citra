@@ -61,7 +61,7 @@ void Shutdown() {
 static Common::Profiling::TimingCategory shader_category("Vertex Shader");
 MICROPROFILE_DEFINE(GPU_VertexShader, "GPU", "Vertex Shader", MP_RGB(50, 50, 240));
 
-OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attributes) {
+void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attributes) {
     auto& config = g_state.regs.vs;
 
     Common::Profiling::ScopeTimer timer(shader_category);
@@ -100,11 +100,13 @@ OutputVertex Run(UnitState<false>& state, const InputVertex& input, int num_attr
     if (VideoCore::g_shader_jit_enabled)
         jit_shader(&state.registers);
     else
-        RunInterpreter(state);
+        RunInterpreter(state, g_state.vs);
 #else
-    RunInterpreter(state);
+    RunInterpreter(state, g_state.vs);
 #endif // ARCHITECTURE_x86_64
+}
 
+OutputVertex ConvertOutputAttributes(UnitState<false>& state) {
     // Setup output data
     OutputVertex ret;
     // TODO(neobrain): Under some circumstances, up to 16 attributes may be output. We need to
@@ -178,7 +180,7 @@ DebugData<true> ProduceDebugInfo(const InputVertex& input, int num_attributes, c
     state.conditional_code[0] = false;
     state.conditional_code[1] = false;
 
-    RunInterpreter(state);
+    RunInterpreter(state, g_state.vs);
     return state.debug;
 }
 
