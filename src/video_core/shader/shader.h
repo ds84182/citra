@@ -279,6 +279,13 @@ struct UnitState {
         Math::Vec4<float24> MEMORY_ALIGNED16(input[16]);
         Math::Vec4<float24> MEMORY_ALIGNED16(output[16]);
         Math::Vec4<float24> MEMORY_ALIGNED16(temporary[16]);
+        // Buffer that the Geometry Shader emit instruction uses
+        Math::Vec4<float24> MEMORY_ALIGNED16(emitBuffer[4]);
+        union EmitParameters {
+            BitField<22, 1, u32> winding;
+            BitField<23, 1, u32> primitiveEmit;
+            BitField<24, 2, u32> vertexId;
+        } emitParams;
     } registers;
     static_assert(std::is_pod<Registers>::value, "Structure is not POD");
 
