@@ -418,11 +418,12 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     // Send to vertex shader
                     Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
 
+                    // TODO(ds84182): This would be more accurate if it looked at induvidual shader units for the geoshader bit
                     if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
                         // copy into the geoshader buffer
                         for (unsigned int i=0; i<vs_output_count; i++) {
                             if (gs_input_index >= gs_input_count) {
-                                // TODO: LOG_ERROR()
+                                // TODO(ds84182): LOG_ERROR()
                                 continue;
                             }
                             gs_input.attr[gs_input_index++] = shader_unit.registers.output[i];
