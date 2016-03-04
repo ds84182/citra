@@ -106,6 +106,48 @@ void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attrib
 #endif // ARCHITECTURE_x86_64
 }
 
+void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes) {
+    auto& config = g_state.regs.gs;
+
+    state.program_counter = config.main_offset;
+    state.debug.max_offset = 0;
+    state.debug.max_opdesc_id = 0;
+
+    // Setup input register table
+    const auto& attribute_register_map = config.input_register_map;
+
+    // TODO: Instead of this cumbersome logic, just load the input data directly like
+    // for (int attr = 0; attr < num_attributes; ++attr) { input_attr[0] = state.registers.input[attribute_register_map.attribute0_register]; }
+    if (num_attributes > 0) state.registers.input[attribute_register_map.attribute0_register] = input.attr[0];
+    if (num_attributes > 1) state.registers.input[attribute_register_map.attribute1_register] = input.attr[1];
+    if (num_attributes > 2) state.registers.input[attribute_register_map.attribute2_register] = input.attr[2];
+    if (num_attributes > 3) state.registers.input[attribute_register_map.attribute3_register] = input.attr[3];
+    if (num_attributes > 4) state.registers.input[attribute_register_map.attribute4_register] = input.attr[4];
+    if (num_attributes > 5) state.registers.input[attribute_register_map.attribute5_register] = input.attr[5];
+    if (num_attributes > 6) state.registers.input[attribute_register_map.attribute6_register] = input.attr[6];
+    if (num_attributes > 7) state.registers.input[attribute_register_map.attribute7_register] = input.attr[7];
+    if (num_attributes > 8) state.registers.input[attribute_register_map.attribute8_register] = input.attr[8];
+    if (num_attributes > 9) state.registers.input[attribute_register_map.attribute9_register] = input.attr[9];
+    if (num_attributes > 10) state.registers.input[attribute_register_map.attribute10_register] = input.attr[10];
+    if (num_attributes > 11) state.registers.input[attribute_register_map.attribute11_register] = input.attr[11];
+    if (num_attributes > 12) state.registers.input[attribute_register_map.attribute12_register] = input.attr[12];
+    if (num_attributes > 13) state.registers.input[attribute_register_map.attribute13_register] = input.attr[13];
+    if (num_attributes > 14) state.registers.input[attribute_register_map.attribute14_register] = input.attr[14];
+    if (num_attributes > 15) state.registers.input[attribute_register_map.attribute15_register] = input.attr[15];
+
+    state.conditional_code[0] = false;
+    state.conditional_code[1] = false;
+
+#ifdef ARCHITECTURE_x86_64
+    if (VideoCore::g_shader_jit_enabled)
+        jit_shader(&state.registers);
+    else
+        RunInterpreter(state, g_state.gs);
+#else
+    RunInterpreter(state, g_state.gs);
+#endif // ARCHITECTURE_x86_64
+}
+
 OutputVertex ConvertOutputAttributes(UnitState<false>& state) {
     // Setup output data
     OutputVertex ret;

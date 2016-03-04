@@ -606,6 +606,16 @@ void RunInterpreter(UnitState<Debug>& state, const Pica::State::ShaderSetup& sha
                 break;
             }
 
+            case OpCode::Id::EMIT: {
+                LOG_ERROR(HW_GPU, "EMIT Instruction Called!");
+                break;
+            }
+
+            case OpCode::Id::SETEMIT: {
+                LOG_ERROR(HW_GPU, "SETEMIT Instruction Called!");
+                break;
+            }
+
             default:
                 LOG_ERROR(HW_GPU, "Unhandled instruction: 0x%02x (%s): 0x%08x",
                           (int)instr.opcode.Value().EffectiveOpCode(), instr.opcode.Value().GetInfo().name, instr.hex);

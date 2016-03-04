@@ -71,7 +71,7 @@ struct Regs {
     BitField<0, 24, u32> viewport_depth_range; // float24
     BitField<0, 24, u32> viewport_depth_far_plane; // float24
 
-    INSERT_PADDING_WORDS(0x1);
+    BitField<0, 3, u32> vs_output_attributes_count;
 
     union VSOutputAttributes {
         // Maps components of output vertex attributes to semantics
@@ -1123,7 +1123,13 @@ struct Regs {
             BitField<24, 8, u32> w;
         } int_uniforms[4];
 
-        INSERT_PADDING_WORDS(0x5);
+        INSERT_PADDING_WORDS(0x4);
+
+        union {
+            BitField<0, 4, u32> count; // Count is (Real Count - 1)!
+            BitField<8, 4, u32> use_subdivision;
+            BitField<24, 8, u32> use_geometry_shader;
+        } input_buffer_config;
 
         // Offset to shader program entry point (in words)
         BitField<0, 16, u32> main_offset;

@@ -238,9 +238,27 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             PrimitiveAssembler<DebugUtils::GeometryDumper::Vertex> dumping_primitive_assembler(regs.triangle_topology.Value());
 #endif
             PrimitiveAssembler<Shader::OutputVertex> primitive_assembler(regs.triangle_topology.Value());
+
+            // Vertex Shader Outputs are converted into Geometry Shader inputs by filling up a buffer
+            // For example, if we have a geoshader that takes 6 inputs, and the vertex shader outputs 2 attributes
+            // It would take 3 vertices to fill up the Geometry Shader buffer
+
+            // However, I have no clue what happens when the number of geoshader inputs is not divisible by vertex shader output
+            // count (nGeoInput%nVtxOutput != 0)
+            // For right now, just assert.
+            // TODO(ds84182): Verify hardware behavior
+            ASSERT_MSG((regs.gs.input_buffer_config.count+1)%regs.vs_output_attributes_count == 0,
+                "Number of GS inputs (%d) is not divisible by number of VS outputs (%d)",
+                regs.gs.input_buffer_config.count+1, regs.vs_output_attributes_count);
+
+            // I also do not know what happens when the number of geoshader inputs is greater than the vertex shader out count*3
+            // (nGeoInput > nVtxOutput*3)
+            // EDIT: They get buffered! Yes!
             // Buffer used when making inputs for the geoshader
-            std::array<Shader::InputVertex, 2> geoshader_buffer;
-            unsigned int geoshader_index = 0;
+            Shader::InputVertex gs_input;
+            unsigned int gs_input_index = 0;
+            unsigned int gs_input_count = regs.gs.input_buffer_config.count+1;
+            unsigned int vs_output_count = regs.vs_output_attributes_count;
 
             if (g_debug_context) {
                 for (int i = 0; i < 3; ++i) {
@@ -401,22 +419,20 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                     Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
 
                     if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
-                        if (geoshader_index == 2) {
+                        // copy into the geoshader buffer
+                        for (unsigned int i=0; i<vs_output_count; i++) {
+                            if (gs_input_index >= gs_input_count) {
+                                // TODO: LOG_ERROR()
+                                continue;
+                            }
+                            gs_input.attr[gs_input_index++] = shader_unit.registers.output[i];
+                        }
+
+                        if (gs_input_index >= gs_input_count) {
                             // Process Geometry Shader
-                            Shader::Input inputC = {shader_unit.regs.output};
+                            Shader::RunGeometry(shader_unit, gs_input, gs_input_count);
 
-                            LOG_ERROR(HW_GPU, "TODO: Invoke geometry shader for vertex %x (index %x): (%f, %f, %f, %f; %f %f %f %f; %f %f %f %f)",
-                                      vertex, index,
-                                      geoshader_buffer[0][0].ToFloat32(), geoshader_buffer[0][1].ToFloat32(),
-                                      geoshader_buffer[0][2].ToFloat32(), geoshader_buffer[0][3].ToFloat32(),
-                                      geoshader_buffer[1][0].ToFloat32(), geoshader_buffer[1][1].ToFloat32(),
-                                      geoshader_buffer[1][2].ToFloat32(), geoshader_buffer[1][3].ToFloat32(),
-                                      inputC[0].ToFloat32(), inputC[1].ToFloat32(),
-                                      inputC[2].ToFloat32(), inputC[3].ToFloat32());
-
-                            geoshader_index = 0;
-                        } else {
-                            geoshader_buffer[geoshader_index++] = {shader_unit.regs.output};
+                            gs_input_index = 0;
                         }
                     } else {
                         Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit);

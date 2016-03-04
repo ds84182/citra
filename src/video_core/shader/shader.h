@@ -361,6 +361,8 @@ void Shutdown();
  */
 void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attributes);
 
+void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes/*, PrimitiveAssembler::TriangleHandler */);
+
 OutputVertex ConvertOutputAttributes(UnitState<false>& state);
 
 /**
