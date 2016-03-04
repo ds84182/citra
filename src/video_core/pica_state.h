@@ -53,6 +53,14 @@ struct State {
 
         ImmediateModeState() : primitive_assembler(Regs::TriangleTopology::List) {}
     } immediate;
+
+    /// Current geometry shader state
+    struct GeometryShaderState {
+        // Buffer used for geometry shader inputs
+        Shader::InputVertex buffer;
+        // The current index into the buffer
+        unsigned int index;
+    } gs_input_buffer;
 };
 
 extern State g_state; ///< Current Pica state

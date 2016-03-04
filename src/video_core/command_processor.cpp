@@ -46,6 +46,55 @@ static const u32 expand_bits_to_bytes[] = {
 
 MICROPROFILE_DEFINE(GPU_Drawing, "GPU", "Drawing", MP_RGB(50, 50, 240));
 
+static void SubmitTriangle(const Shader::OutputVertex& v0, const Shader::OutputVertex& v1, const Shader::OutputVertex& v2) {
+    VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
+}
+
+static void ProcessVertex(Shader::InputVertex& input, Shader::UnitState<false>& shader_unit, PrimitiveAssembler<Shader::OutputVertex>& primitive_assembler) {
+    auto& regs = g_state.regs;
+    auto& gs_state = g_state.gs;
+    auto& gs_regs = g_state.regs.gs;
+    auto& gs_buf = g_state.gs_input_buffer;
+    auto& attribute_config = regs.vertex_attributes;
+
+    // Send to vertex shader
+    Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
+
+    // TODO(ds84182): This would be more accurate if it looked at induvidual shader units for the geoshader bit
+    if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
+        // Vertex Shader Outputs are converted into Geometry Shader inputs by filling up a buffer
+        // For example, if we have a geoshader that takes 6 inputs, and the vertex shader outputs 2 attributes
+        // It would take 3 vertices to fill up the Geometry Shader buffer
+        unsigned int gs_input_count = gs_regs.input_buffer_config.count+1;
+        unsigned int vs_output_count = regs.vs_output_attributes_count;
+        // copy into the geoshader buffer
+        for (unsigned int i=0; i<vs_output_count; i++) {
+            if (gs_buf.index >= gs_input_count) {
+                // TODO(ds84182): LOG_ERROR()
+                continue;
+            }
+            gs_buf.buffer.attr[gs_buf.index++] = shader_unit.registers.output[i];
+        }
+
+        if (gs_buf.index >= gs_input_count) {
+            // I have no clue what happens when the number of geoshader inputs is not divisible by vertex shader output
+            // count (nGeoInput%nVtxOutput != 0)
+            // For right now, just assert.
+            // TODO(ds84182): Verify hardware behavior
+            ASSERT_MSG(gs_input_count%vs_output_count == 0,
+                "Number of GS inputs (%d) is not divisible by number of VS outputs (%d)",
+                gs_input_count, vs_output_count);
+            // Process Geometry Shader
+            Shader::RunGeometry(shader_unit, gs_buf.buffer, gs_input_count, SubmitTriangle);
+
+            gs_buf.index = 0;
+        }
+    } else {
+        Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit.registers.output);
+        primitive_assembler.SubmitVertex(output, SubmitTriangle);
+    }
+}
+
 static void WritePicaReg(u32 id, u32 value, u32 mask) {
     auto& regs = g_state.regs;
 
@@ -136,16 +185,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                         Shader::UnitState<false> shader_unit;
                         Shader::Setup(shader_unit);
 
-                        // Send to vertex shader
-                        Shader::OutputVertex output = Shader::Run(shader_unit, immediate_input, attribute_config.GetNumTotalAttributes());
-
-                        // Send to renderer
-                        using Pica::Shader::OutputVertex;
-                        auto AddTriangle = [](const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
-                            VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
-                        };
-
-                        g_state.immediate.primitive_assembler.SubmitVertex(output, AddTriangle);
+                        ProcessVertex(immediate_input, shader_unit, g_state.immediate.primitive_assembler);
                     }
                 }
             }
@@ -238,27 +278,6 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             PrimitiveAssembler<DebugUtils::GeometryDumper::Vertex> dumping_primitive_assembler(regs.triangle_topology.Value());
 #endif
             PrimitiveAssembler<Shader::OutputVertex> primitive_assembler(regs.triangle_topology.Value());
-
-            // Vertex Shader Outputs are converted into Geometry Shader inputs by filling up a buffer
-            // For example, if we have a geoshader that takes 6 inputs, and the vertex shader outputs 2 attributes
-            // It would take 3 vertices to fill up the Geometry Shader buffer
-
-            // However, I have no clue what happens when the number of geoshader inputs is not divisible by vertex shader output
-            // count (nGeoInput%nVtxOutput != 0)
-            // For right now, just assert.
-            // TODO(ds84182): Verify hardware behavior
-            ASSERT_MSG((regs.gs.input_buffer_config.count+1)%regs.vs_output_attributes_count == 0,
-                "Number of GS inputs (%d) is not divisible by number of VS outputs (%d)",
-                regs.gs.input_buffer_config.count+1, regs.vs_output_attributes_count);
-
-            // I also do not know what happens when the number of geoshader inputs is greater than the vertex shader out count*3
-            // (nGeoInput > nVtxOutput*3)
-            // EDIT: They get buffered! Yes!
-            // Buffer used when making inputs for the geoshader
-            Shader::InputVertex gs_input;
-            unsigned int gs_input_index = 0;
-            unsigned int gs_input_count = regs.gs.input_buffer_config.count+1;
-            unsigned int vs_output_count = regs.vs_output_attributes_count;
 
             if (g_debug_context) {
                 for (int i = 0; i < 3; ++i) {
@@ -415,34 +434,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                                                              std::bind(&DebugUtils::GeometryDumper::AddTriangle,
                                                                        &geometry_dumper, _1, _2, _3));
 #endif
-                    // Send to vertex shader
-                    Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
-
-                    // TODO(ds84182): This would be more accurate if it looked at induvidual shader units for the geoshader bit
-                    if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
-                        // copy into the geoshader buffer
-                        for (unsigned int i=0; i<vs_output_count; i++) {
-                            if (gs_input_index >= gs_input_count) {
-                                // TODO(ds84182): LOG_ERROR()
-                                continue;
-                            }
-                            gs_input.attr[gs_input_index++] = shader_unit.registers.output[i];
-                        }
-
-                        if (gs_input_index >= gs_input_count) {
-                            // Process Geometry Shader
-                            Shader::RunGeometry(shader_unit, gs_input, gs_input_count, [&](Shader::OutputVertex &v0, Shader::OutputVertex &v1, Shader::OutputVertex &v2) {
-                                AddVertex(v0);
-                                AddVertex(v1);
-                                AddVertex(v2);
-                            });
-
-                            gs_input_index = 0;
-                        }
-                    } else {
-                        Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit.registers.output);
-                        AddVertex(output);
-                    }
+                    ProcessVertex(input, shader_unit, g_state.immediate.primitive_assembler);
 
                     if (is_indexed) {
                         vertex_cache[vertex_cache_pos] = output;

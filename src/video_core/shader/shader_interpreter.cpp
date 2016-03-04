@@ -22,7 +22,7 @@ namespace Pica {
 namespace Shader {
 
 template<bool Debug>
-void RunInterpreter(UnitState<Debug>& state, const Pica::State::ShaderSetup& shader) {
+void RunInterpreter(UnitState<Debug>& state, const ShaderSetup& shader) {
     const auto& uniforms = shader.uniforms;
     const auto& swizzle_data = shader.swizzle_data;
     const auto& program_code = shader.program_code;
@@ -646,8 +646,8 @@ void RunInterpreter(UnitState<Debug>& state, const Pica::State::ShaderSetup& sha
 }
 
 // Explicit instantiation
-template void RunInterpreter(UnitState<false>& state, const Pica::State::ShaderSetup& shader);
-template void RunInterpreter(UnitState<true>& state, const Pica::State::ShaderSetup& shader);
+template void RunInterpreter(UnitState<false>& state, const ShaderSetup& shader);
+template void RunInterpreter(UnitState<true>& state, const ShaderSetup& shader);
 
 } // namespace
 
