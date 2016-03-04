@@ -15,6 +15,7 @@
 #include "common/vector_math.h"
 
 #include "video_core/pica.h"
+#include "video_core/primitive_assembly.h"
 
 using nihstro::RegisterType;
 using nihstro::SourceRegister;
@@ -280,12 +281,13 @@ struct UnitState {
         Math::Vec4<float24> MEMORY_ALIGNED16(output[16]);
         Math::Vec4<float24> MEMORY_ALIGNED16(temporary[16]);
         // Buffer that the Geometry Shader emit instruction uses
-        Math::Vec4<float24> MEMORY_ALIGNED16(emitBuffer[4]);
+        Math::Vec4<float24> MEMORY_ALIGNED16(emit_buffer[4][16]);
         union EmitParameters {
+            u32 raw;
             BitField<22, 1, u32> winding;
-            BitField<23, 1, u32> primitiveEmit;
-            BitField<24, 2, u32> vertexId;
-        } emitParams;
+            BitField<23, 1, u32> primitive_emit;
+            BitField<24, 2, u32> vertex_id;
+        } emit_params;
     } registers;
     static_assert(std::is_pod<Registers>::value, "Structure is not POD");
 
@@ -311,6 +313,8 @@ struct UnitState {
 
     // TODO: Is there a maximal size for this?
     boost::container::static_vector<CallStackElement, 16> call_stack;
+
+    PrimitiveAssembler<OutputVertex>::TriangleHandler geoshader_triangle_callback;
 
     DebugData<Debug> debug;
 
@@ -361,9 +365,9 @@ void Shutdown();
  */
 void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attributes);
 
-void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes/*, PrimitiveAssembler::TriangleHandler */);
+void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes, PrimitiveAssembler<OutputVertex>::TriangleHandler triangleHandler);
 
-OutputVertex ConvertOutputAttributes(UnitState<false>& state);
+OutputVertex ConvertOutputAttributes(Math::Vec4<float24> (&attrs)[16]);
 
 /**
  * Produce debug information based on the given shader and input vertex

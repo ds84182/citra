@@ -430,12 +430,16 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                         if (gs_input_index >= gs_input_count) {
                             // Process Geometry Shader
-                            Shader::RunGeometry(shader_unit, gs_input, gs_input_count);
+                            Shader::RunGeometry(shader_unit, gs_input, gs_input_count, [&](Shader::OutputVertex &v0, Shader::OutputVertex &v1, Shader::OutputVertex &v2) {
+                                AddVertex(v0);
+                                AddVertex(v1);
+                                AddVertex(v2);
+                            });
 
                             gs_input_index = 0;
                         }
                     } else {
-                        Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit);
+                        Shader::OutputVertex output = Shader::ConvertOutputAttributes(shader_unit.registers.output);
                         AddVertex(output);
                     }
 

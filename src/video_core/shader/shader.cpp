@@ -70,6 +70,7 @@ void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attrib
     state.program_counter = config.main_offset;
     state.debug.max_offset = 0;
     state.debug.max_opdesc_id = 0;
+    state.geoshader_triangle_callback = nullptr;
 
     // Setup input register table
     const auto& attribute_register_map = config.input_register_map;
@@ -106,12 +107,13 @@ void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attrib
 #endif // ARCHITECTURE_x86_64
 }
 
-void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes) {
+void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes, PrimitiveAssembler<OutputVertex>::TriangleHandler triangle_callback) {
     auto& config = g_state.regs.gs;
 
     state.program_counter = config.main_offset;
     state.debug.max_offset = 0;
     state.debug.max_opdesc_id = 0;
+    state.geoshader_triangle_callback = triangle_callback;
 
     // Setup input register table
     const auto& attribute_register_map = config.input_register_map;
@@ -148,12 +150,12 @@ void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attr
 #endif // ARCHITECTURE_x86_64
 }
 
-OutputVertex ConvertOutputAttributes(UnitState<false>& state) {
+OutputVertex ConvertOutputAttributes(Math::Vec4<float24> (&attrs)[16]) {
     // Setup output data
     OutputVertex ret;
     // TODO(neobrain): Under some circumstances, up to 16 attributes may be output. We need to
     // figure out what those circumstances are and enable the remaining outputs then.
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < g_state.regs.vs_output_attributes_count; ++i) {
         const auto& output_register_map = g_state.regs.vs_output_attributes[i]; // TODO: Don't hardcode VS here
 
         u32 semantics[4] = {
@@ -164,7 +166,7 @@ OutputVertex ConvertOutputAttributes(UnitState<false>& state) {
         for (int comp = 0; comp < 4; ++comp) {
             float24* out = ((float24*)&ret) + semantics[comp];
             if (semantics[comp] != Regs::VSOutputAttributes::INVALID) {
-                *out = state.registers.output[i][comp];
+                *out = attrs[i][comp];
             } else {
                 // Zero output so that attributes which aren't output won't have denormals in them,
                 // which would slow us down later.

@@ -607,12 +607,26 @@ void RunInterpreter(UnitState<Debug>& state, const Pica::State::ShaderSetup& sha
             }
 
             case OpCode::Id::EMIT: {
-                LOG_ERROR(HW_GPU, "EMIT Instruction Called!");
+                auto &emit_params = state.registers.emit_params;
+                auto &emit_buffer = state.registers.emit_buffer;
+
+                //LOG_ERROR(HW_GPU, "EMIT Instruction Called! %d %d %d", emit_params.winding.Value(), emit_params.primitive_emit.Value(), emit_params.vertex_id.Value());
+
+                auto &buffer_data = emit_buffer[emit_params.vertex_id];
+                std::copy(std::begin(state.registers.output), std::end(state.registers.output), std::begin(buffer_data));
+
+                if (emit_params.primitive_emit) {
+                    ASSERT_MSG(state.geoshader_triangle_callback, "EMIT invoked inside of Vertex Shader!");
+                    OutputVertex v0 = ConvertOutputAttributes(emit_buffer[0]);
+                    OutputVertex v1 = ConvertOutputAttributes(emit_buffer[1]);
+                    OutputVertex v2 = ConvertOutputAttributes(emit_buffer[2]);
+                    state.geoshader_triangle_callback(v0, v1, v2);
+                }
                 break;
             }
 
             case OpCode::Id::SETEMIT: {
-                LOG_ERROR(HW_GPU, "SETEMIT Instruction Called!");
+                state.registers.emit_params.raw = program_code[state.program_counter];
                 break;
             }
 
