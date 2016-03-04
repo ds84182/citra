@@ -108,7 +108,7 @@ void RunVertex(UnitState<false>& state, const InputVertex& input, int num_attrib
 }
 
 void RunGeometry(UnitState<false>& state, const InputVertex& input, int num_attributes, PrimitiveAssembler<OutputVertex>::TriangleHandler triangle_callback) {
-    ASSERT_MSG(g_state.regs.gs.input_buffer_config.use_subdivision, "Geometry Shader subdivision not yet implemented");
+    ASSERT_MSG(!g_state.regs.gs.input_buffer_config.use_subdivision, "Geometry Shader subdivision not yet implemented");
     // TODO(ds84182): Look at geoshader mode register
     auto& config = g_state.regs.gs;
 
