@@ -157,7 +157,7 @@ OutputVertex ConvertOutputAttributes(Math::Vec4<float24> (&attrs)[16]) {
     OutputVertex ret;
     // TODO(neobrain): Under some circumstances, up to 16 attributes may be output. We need to
     // figure out what those circumstances are and enable the remaining outputs then.
-    for (int i = 0; i < g_state.regs.vs_output_attributes_count; ++i) {
+    for (int i = 0; i < 7; ++i) {
         const auto& output_register_map = g_state.regs.vs_output_attributes[i]; // TODO: Don't hardcode VS here
 
         u32 semantics[4] = {

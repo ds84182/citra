@@ -610,7 +610,7 @@ void RunInterpreter(UnitState<Debug>& state, const ShaderSetup& shader) {
                 auto &emit_params = state.registers.emit_params;
                 auto &emit_buffer = state.registers.emit_buffer;
 
-                //LOG_ERROR(HW_GPU, "EMIT Instruction Called! %d %d %d", emit_params.winding.Value(), emit_params.primitive_emit.Value(), emit_params.vertex_id.Value());
+                LOG_ERROR(HW_GPU, "EMIT Instruction Called! %d %d %d", emit_params.winding.Value(), emit_params.primitive_emit.Value(), emit_params.vertex_id.Value());
 
                 auto &buffer_data = emit_buffer[emit_params.vertex_id];
                 std::copy(std::begin(state.registers.output), std::end(state.registers.output), std::begin(buffer_data));

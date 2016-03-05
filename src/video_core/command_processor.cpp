@@ -50,7 +50,7 @@ static void SubmitTriangle(const Shader::OutputVertex& v0, const Shader::OutputV
     VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
 }
 
-static void ProcessVertex(Shader::InputVertex& input, Shader::UnitState<false>& shader_unit, PrimitiveAssembler<Shader::OutputVertex>& primitive_assembler) {
+static void ProcessVertex(const Shader::InputVertex& input, Shader::UnitState<false>& shader_unit, PrimitiveAssembler<Shader::OutputVertex>& primitive_assembler) {
     auto& regs = g_state.regs;
     auto& gs_state = g_state.gs;
     auto& gs_regs = g_state.regs.gs;
@@ -61,12 +61,13 @@ static void ProcessVertex(Shader::InputVertex& input, Shader::UnitState<false>& 
     Shader::RunVertex(shader_unit, input, attribute_config.GetNumTotalAttributes());
 
     // TODO(ds84182): This would be more accurate if it looked at induvidual shader units for the geoshader bit
-    if (regs.triangle_topology == Regs::TriangleTopology::Shader) {
+    // gs_regs.input_buffer_config.use_geometry_shader == 0x08
+    if (regs.using_geometry_shader == 2) {
         // Vertex Shader Outputs are converted into Geometry Shader inputs by filling up a buffer
         // For example, if we have a geoshader that takes 6 inputs, and the vertex shader outputs 2 attributes
         // It would take 3 vertices to fill up the Geometry Shader buffer
         unsigned int gs_input_count = gs_regs.input_buffer_config.count+1;
-        unsigned int vs_output_count = regs.vs_output_attributes_count;
+        unsigned int vs_output_count = regs.vs_outmap_count+1;
         // copy into the geoshader buffer
         for (unsigned int i=0; i<vs_output_count; i++) {
             if (gs_buf.index >= gs_input_count) {
@@ -330,17 +331,6 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
             Shader::UnitState<false> shader_unit;
             Shader::Setup(shader_unit);
 
-            const auto AddVertex = [&](Shader::OutputVertex &output) {
-                // Send to renderer
-                using Pica::Shader::OutputVertex;
-                auto AddTriangle = [](
-                        const OutputVertex& v0, const OutputVertex& v1, const OutputVertex& v2) {
-                    VideoCore::g_renderer->rasterizer->AddTriangle(v0, v1, v2);
-                };
-
-                primitive_assembler.SubmitVertex(output, AddTriangle);
-            };
-
             for (unsigned int index = 0; index < regs.num_vertices; ++index)
             {
                 // Indexed rendering doesn't use the start offset
@@ -361,8 +351,9 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
 
                     for (unsigned int i = 0; i < VERTEX_CACHE_SIZE; ++i) {
                         if (vertex == vertex_cache_ids[i]) {
-                            AddVertex(vertex_cache[i]);
-                            vertex_cache_hit = true;
+                            //TODO: Fix this!
+                            //ProcessVertex(vertex_cache[i], shader_unit, primitive_assembler);
+                            //vertex_cache_hit = true;
                             //TODO: Maybe an outer continue here?
                             break;
                         }
@@ -434,7 +425,7 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
                                                              std::bind(&DebugUtils::GeometryDumper::AddTriangle,
                                                                        &geometry_dumper, _1, _2, _3));
 #endif
-                    ProcessVertex(input, shader_unit, g_state.immediate.primitive_assembler);
+                    ProcessVertex(input, shader_unit, primitive_assembler);
 
                     if (is_indexed) {
                         vertex_cache[vertex_cache_pos] = output;

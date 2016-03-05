@@ -1041,7 +1041,7 @@ struct Regs {
     // Number of vertices to render
     u32 num_vertices;
 
-    INSERT_PADDING_WORDS(0x1);
+    BitField<0, 2, u32> using_geometry_shader;
 
     // The index of the first vertex to render
     u32 vertex_offset;
@@ -1107,7 +1107,10 @@ struct Regs {
         Shader = 3, // Programmable setup unit implemented in a geometry shader
     };
 
-    BitField<8, 2, TriangleTopology> triangle_topology;
+    union {
+        BitField<0, 4, u32> vs_outmap_count;
+        BitField<8, 2, TriangleTopology> triangle_topology;
+    };
 
     u32 restart_primitive;
 
