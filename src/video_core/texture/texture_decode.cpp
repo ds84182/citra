@@ -241,6 +241,56 @@ void DecodeToRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& in
     });
 }
 
+template <bool HasAlpha, typename OutputPixel>
+void DecodeETCTiles(unsigned int tile_x, unsigned int tile_y, const u8* tile, const OutputPixel& outputPixel) {
+    constexpr size_t subtile_size = HasAlpha ? 16 : 8;
+
+    // ETC1 further subdivides each 8x8 tile into four 4x4 subtiles
+    constexpr unsigned int subtile_width = 4;
+    constexpr unsigned int subtile_height = 4;
+
+    for (unsigned int subtile_index = 0; subtile_index < 4; subtile_index++) {
+        unsigned int subtile_x_offset = ((subtile_index % 2) * subtile_width) + (tile_x * 8);
+        unsigned int subtile_y_offset = ((subtile_index / 2) * subtile_height) + (tile_y * 8);
+
+        const u8* subtile_ptr = tile + subtile_index * subtile_size;
+
+        u64_le packed_alpha = 0xFFFFFFFFFFFFFFFFULL;
+        if (HasAlpha) {
+            memcpy(&packed_alpha, subtile_ptr, sizeof(u64));
+            subtile_ptr += sizeof(u64);
+        }
+
+        u64_le subtile_data;
+        memcpy(&subtile_data, subtile_ptr, sizeof(u64));
+
+        ETC1Tile tile{subtile_data};
+
+        for (unsigned y = 0; y < 4; y++) {
+            for (unsigned x = 0; x < 4; x++) {
+                outputPixel(subtile_x_offset + x, subtile_y_offset + y,
+                    Math::MakeVec(tile.GetRGB(x, y),
+                        static_cast<u8>(HasAlpha ? Color::Convert4To8((packed_alpha >> (4 * (x * subtile_width + y))) & 0xF) : 255)));
+            }
+        }
+    }
+}
+
+void DecodeETCToRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info) {
+    DecodeTiles(source, info, [&](unsigned int tile_x, unsigned int tile_y, const u8* tile) {
+        const auto outputPixel = [&](unsigned int x, unsigned int y, const Math::Vec4<u8> &color) {
+            y = info.height - 1 - y;
+            dest[y * info.width + x] = color;
+        };
+        if (info.format == TextureFormat::ETC1) {
+            DecodeETCTiles<false, decltype(outputPixel)>(tile_x, tile_y, tile, outputPixel);
+        } else {
+            ASSERT(info.format == TextureFormat::ETC1A4);
+            DecodeETCTiles<true, decltype(outputPixel)>(tile_x, tile_y, tile, outputPixel);
+        }
+    });
+}
+
 void DecodeRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info) {
     switch (info.format) {
     case TextureFormat::RGBA8:
@@ -292,7 +342,20 @@ void DecodeRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info
             return {0, 0, 0, *source_ptr};
         });
         break;
+    case TextureFormat::IA4:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) -> Math::Vec4<u8> {
+            auto source_ptr = tile + offset;
+            const u8 i = Color::Convert4To8(((*source_ptr) & 0xF0) >> 4);
+            const u8 a = Color::Convert4To8((*source_ptr) & 0xF);
+            return {i, i, i, a};
+        });
+        break;
+    case TextureFormat::ETC1:
+    case TextureFormat::ETC1A4:
+        DecodeETCToRGBA8(source, dest, info);
+        break;
     default:
+        LOG_ERROR(HW_GPU, "Unaccelerated texture copy: %x %dx%d", (u32)info.format, info.width, info.height);
         for (unsigned y = 0; y < info.height; ++y) {
             for (unsigned x = 0; x < info.width; ++x) {
                 dest[x + info.width * y] = Pica::Texture::LookupTexture(source, x, info.height - 1 - y, info);
