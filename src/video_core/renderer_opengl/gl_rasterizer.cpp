@@ -37,15 +37,53 @@ RasterizerOpenGL::RasterizerOpenGL() : shader_dirty(true) {
         state.texture_units[i].sampler = texture_samplers[i].sampler.handle;
     }
 
-    // Generate VBO, VAO and UBO
-    vertex_buffer.Create();
-    vertex_array.Create();
+    // Generate UBO
     uniform_buffer.Create();
-
-    state.draw.vertex_array = vertex_array.handle;
-    state.draw.vertex_buffer = vertex_buffer.handle;
     state.draw.uniform_buffer = uniform_buffer.handle;
-    state.Apply();
+
+    // Generate VBOs and VAOs
+    for (size_t i = 0; i < vertex_buffers.size(); ++i) {
+        vertex_buffers[i].Create();
+        vertex_arrays[i].Create();
+
+        state.draw.vertex_buffer = vertex_buffers[i].handle;
+        state.draw.vertex_array = vertex_arrays[i].handle;
+
+        state.Apply();
+
+        // Set vertex attributes
+        glVertexAttribPointer(GLShader::ATTRIBUTE_POSITION, 4, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, position));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_POSITION);
+
+        glVertexAttribPointer(GLShader::ATTRIBUTE_COLOR, 4, GL_FLOAT, GL_FALSE, sizeof(HardwareVertex),
+            (GLvoid*)offsetof(HardwareVertex, color));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_COLOR);
+
+        glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD0, 2, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord0));
+        glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD1, 2, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord1));
+        glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD2, 2, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord2));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD0);
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD1);
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD2);
+
+        glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD0_W, 1, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord0_w));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD0_W);
+
+        glVertexAttribPointer(GLShader::ATTRIBUTE_NORMQUAT, 4, GL_FLOAT, GL_FALSE,
+            sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, normquat));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_NORMQUAT);
+
+        glVertexAttribPointer(GLShader::ATTRIBUTE_VIEW, 3, GL_FLOAT, GL_FALSE, sizeof(HardwareVertex),
+            (GLvoid*)offsetof(HardwareVertex, view));
+        glEnableVertexAttribArray(GLShader::ATTRIBUTE_VIEW);
+    }
+    state.draw.vertex_buffer = vertex_buffers[0].handle;
+    state.draw.vertex_array = vertex_arrays[0].handle;
 
     // Bind the UBO to binding point 0
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, uniform_buffer.handle);
@@ -61,37 +99,6 @@ RasterizerOpenGL::RasterizerOpenGL() : shader_dirty(true) {
     uniform_block_data.proctex_alpha_map_dirty = true;
     uniform_block_data.proctex_lut_dirty = true;
     uniform_block_data.proctex_diff_lut_dirty = true;
-
-    // Set vertex attributes
-    glVertexAttribPointer(GLShader::ATTRIBUTE_POSITION, 4, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, position));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_POSITION);
-
-    glVertexAttribPointer(GLShader::ATTRIBUTE_COLOR, 4, GL_FLOAT, GL_FALSE, sizeof(HardwareVertex),
-                          (GLvoid*)offsetof(HardwareVertex, color));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_COLOR);
-
-    glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD0, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord0));
-    glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD1, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord1));
-    glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD2, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord2));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD0);
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD1);
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD2);
-
-    glVertexAttribPointer(GLShader::ATTRIBUTE_TEXCOORD0_W, 1, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, tex_coord0_w));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_TEXCOORD0_W);
-
-    glVertexAttribPointer(GLShader::ATTRIBUTE_NORMQUAT, 4, GL_FLOAT, GL_FALSE,
-                          sizeof(HardwareVertex), (GLvoid*)offsetof(HardwareVertex, normquat));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_NORMQUAT);
-
-    glVertexAttribPointer(GLShader::ATTRIBUTE_VIEW, 3, GL_FLOAT, GL_FALSE, sizeof(HardwareVertex),
-                          (GLvoid*)offsetof(HardwareVertex, view));
-    glEnableVertexAttribArray(GLShader::ATTRIBUTE_VIEW);
 
     // Create render framebuffer
     framebuffer.Create();
@@ -378,11 +385,32 @@ void RasterizerOpenGL::DrawTriangles() {
         uniform_block_data.dirty = false;
     }
 
+    const auto vertex_buffer_index = next_vertex_buffer;
+
+    // Bind the next vertex buffer
+    state.draw.vertex_buffer = vertex_buffers[vertex_buffer_index].handle;
+    state.draw.vertex_array = vertex_arrays[vertex_buffer_index].handle;
+
+    next_vertex_buffer++;
+    if (next_vertex_buffer >= vertex_buffers.size()) {
+        next_vertex_buffer = 0;
+    }
+
     state.Apply();
 
+    // Upload vertex batch
+    if (vertex_buffer_sizes[vertex_buffer_index] < vertex_batch.size()) {
+        // Resize OpenGL's vertex buffer
+        glBufferData(GL_ARRAY_BUFFER, vertex_batch.size() * sizeof(HardwareVertex), vertex_batch.data(),
+            GL_DYNAMIC_DRAW);
+        vertex_buffer_sizes[vertex_buffer_index] = vertex_batch.size();
+    } else {
+        // Replace part of the existing buffer
+        glBufferSubData(GL_ARRAY_BUFFER, 0, vertex_batch.size() * sizeof(HardwareVertex),
+            vertex_batch.data());
+    }
+
     // Draw the vertex batch
-    glBufferData(GL_ARRAY_BUFFER, vertex_batch.size() * sizeof(HardwareVertex), vertex_batch.data(),
-                 GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)vertex_batch.size());
 
     // Mark framebuffer surfaces as dirty

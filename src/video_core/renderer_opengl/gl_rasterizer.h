@@ -281,8 +281,13 @@ private:
     } uniform_block_data = {};
 
     std::array<SamplerInfo, 3> texture_samplers;
-    OGLVertexArray vertex_array;
-    OGLBuffer vertex_buffer;
+
+    static constexpr size_t VA_COUNT = 32;
+
+    std::array<OGLVertexArray, VA_COUNT> vertex_arrays;
+    std::array<OGLBuffer, VA_COUNT> vertex_buffers;
+    std::array<size_t, VA_COUNT> vertex_buffer_sizes = {0};
+    size_t next_vertex_buffer = 0;
     OGLBuffer uniform_buffer;
     OGLFramebuffer framebuffer;
 
