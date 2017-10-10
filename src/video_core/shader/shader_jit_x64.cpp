@@ -18,18 +18,20 @@ void JitX64Engine::SetupBatch(ShaderSetup& setup, unsigned int entry_point) {
     ASSERT(entry_point < MAX_PROGRAM_CODE_LENGTH);
     setup.engine_data.entry_point = entry_point;
 
-    u64 code_hash = Common::ComputeHash64(&setup.program_code, sizeof(setup.program_code));
-    u64 swizzle_hash = Common::ComputeHash64(&setup.swizzle_data, sizeof(setup.swizzle_data));
+    if (!setup.engine_data.cached_shader) {
+        u64 code_hash = Common::ComputeHash64(&setup.program_code, sizeof(setup.program_code));
+        u64 swizzle_hash = Common::ComputeHash64(&setup.swizzle_data, sizeof(setup.swizzle_data));
 
-    u64 cache_key = code_hash ^ swizzle_hash;
-    auto iter = cache.find(cache_key);
-    if (iter != cache.end()) {
-        setup.engine_data.cached_shader = iter->second.get();
-    } else {
-        auto shader = std::make_unique<JitShader>();
-        shader->Compile(&setup.program_code, &setup.swizzle_data);
-        setup.engine_data.cached_shader = shader.get();
-        cache.emplace_hint(iter, cache_key, std::move(shader));
+        u64 cache_key = code_hash ^ swizzle_hash;
+        auto iter = cache.find(cache_key);
+        if (iter != cache.end()) {
+            setup.engine_data.cached_shader = iter->second.get();
+        } else {
+            auto shader = std::make_unique<JitShader>();
+            shader->Compile(&setup.program_code, &setup.swizzle_data);
+            setup.engine_data.cached_shader = shader.get();
+            cache.emplace_hint(iter, cache_key, std::move(shader));
+        }
     }
 }
 

@@ -451,7 +451,10 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         if (offset >= 4096) {
             LOG_ERROR(HW_GPU, "Invalid GS program offset %u", offset);
         } else {
-            g_state.gs.program_code[offset] = value;
+            if (g_state.gs.program_code[offset] != value) {
+                g_state.gs.program_code[offset] = value;
+                g_state.gs.engine_data.cached_shader = nullptr;
+            }
             offset++;
         }
         break;
@@ -469,7 +472,10 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         if (offset >= g_state.gs.swizzle_data.size()) {
             LOG_ERROR(HW_GPU, "Invalid GS swizzle pattern offset %u", offset);
         } else {
-            g_state.gs.swizzle_data[offset] = value;
+            if (g_state.gs.swizzle_data[offset] != value) {
+                g_state.gs.swizzle_data[offset] = value;
+                g_state.gs.engine_data.cached_shader = nullptr;
+            }
             offset++;
         }
         break;
@@ -518,9 +524,14 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         if (offset >= 512) {
             LOG_ERROR(HW_GPU, "Invalid VS program offset %u", offset);
         } else {
-            g_state.vs.program_code[offset] = value;
-            if (!g_state.regs.pipeline.gs_unit_exclusive_configuration) {
+            if (g_state.vs.program_code[offset] != value) {
+                g_state.vs.program_code[offset] = value;
+                g_state.vs.engine_data.cached_shader = nullptr;
+            }
+            if (!g_state.regs.pipeline.gs_unit_exclusive_configuration &&
+                g_state.gs.program_code[offset] != value) {
                 g_state.gs.program_code[offset] = value;
+                g_state.gs.engine_data.cached_shader = nullptr;
             }
             offset++;
         }
@@ -539,9 +550,14 @@ static void WritePicaReg(u32 id, u32 value, u32 mask) {
         if (offset >= g_state.vs.swizzle_data.size()) {
             LOG_ERROR(HW_GPU, "Invalid VS swizzle pattern offset %u", offset);
         } else {
-            g_state.vs.swizzle_data[offset] = value;
-            if (!g_state.regs.pipeline.gs_unit_exclusive_configuration) {
+            if (g_state.vs.swizzle_data[offset] != value) {
+                g_state.vs.swizzle_data[offset] = value;
+                g_state.vs.engine_data.cached_shader = nullptr;
+            }
+            if (!g_state.regs.pipeline.gs_unit_exclusive_configuration &&
+                g_state.gs.swizzle_data[offset] != value) {
                 g_state.gs.swizzle_data[offset] = value;
+                g_state.gs.engine_data.cached_shader = nullptr;
             }
             offset++;
         }
