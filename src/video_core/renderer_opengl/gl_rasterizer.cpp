@@ -1223,7 +1223,6 @@ void RasterizerOpenGL::SamplerInfo::SyncWithConfig(
 
 void RasterizerOpenGL::SetShader() {
     auto config = GLShader::PicaShaderConfig::BuildFromRegs(Pica::g_state.regs);
-    std::unique_ptr<PicaShader> shader = std::make_unique<PicaShader>();
 
     // Find (or generate) the GLSL shader for the current TEV state
     auto cached_shader = shader_cache.find(config);
@@ -1234,6 +1233,8 @@ void RasterizerOpenGL::SetShader() {
         state.Apply();
     } else {
         LOG_DEBUG(Render_OpenGL, "Creating new shader");
+
+        std::unique_ptr<PicaShader> shader = std::make_unique<PicaShader>();
 
         shader->shader.Create(GLShader::GenerateVertexShader().c_str(),
                               GLShader::GenerateFragmentShader(config).c_str());
