@@ -56,5 +56,7 @@ Math::Vec4<u8> LookupTexture(const u8* source, unsigned int x, unsigned int y,
 Math::Vec4<u8> LookupTexelInTile(const u8* source, unsigned int x, unsigned int y,
                                  const TextureInfo& info, bool disable_alpha);
 
+void DecodeRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info);
+
 } // namespace Texture
 } // namespace Pica

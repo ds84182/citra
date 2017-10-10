@@ -8,11 +8,95 @@
 
 namespace VideoCore {
 
-// 8x8 Z-Order coordinate from 2D coordinates
-static inline u32 MortonInterleave(u32 x, u32 y) {
-    static const u32 xlut[] = {0x00, 0x01, 0x04, 0x05, 0x10, 0x11, 0x14, 0x15};
-    static const u32 ylut[] = {0x00, 0x02, 0x08, 0x0a, 0x20, 0x22, 0x28, 0x2a};
-    return xlut[x % 8] + ylut[y % 8];
+/**
+ * Interleave the lower 3 bits of each coordinate to get the intra-block offsets, which are
+ * arranged in a Z-order curve. More details on the bit manipulation at:
+ * https://fgiesen.wordpress.com/2009/12/13/decoding-morton-codes/
+ */
+static constexpr inline u32 GenerateMortonInterleave(u32 x, u32 y) {
+    u32 i = (x & 7) | ((y & 7) << 8); // ---- -210
+    i = (i ^ (i << 2)) & 0x1313;      // ---2 --10
+    i = (i ^ (i << 1)) & 0x1515;      // ---2 -1-0
+    i = (i | (i >> 7)) & 0x3F;
+    return i;
+}
+
+constexpr u32 MortonLUT[8 * 8] = {
+    GenerateMortonInterleave(0, 0),
+    GenerateMortonInterleave(1, 0),
+    GenerateMortonInterleave(2, 0),
+    GenerateMortonInterleave(3, 0),
+    GenerateMortonInterleave(4, 0),
+    GenerateMortonInterleave(5, 0),
+    GenerateMortonInterleave(6, 0),
+    GenerateMortonInterleave(7, 0),
+
+    GenerateMortonInterleave(0, 1),
+    GenerateMortonInterleave(1, 1),
+    GenerateMortonInterleave(2, 1),
+    GenerateMortonInterleave(3, 1),
+    GenerateMortonInterleave(4, 1),
+    GenerateMortonInterleave(5, 1),
+    GenerateMortonInterleave(6, 1),
+    GenerateMortonInterleave(7, 1),
+
+    GenerateMortonInterleave(0, 2),
+    GenerateMortonInterleave(1, 2),
+    GenerateMortonInterleave(2, 2),
+    GenerateMortonInterleave(3, 2),
+    GenerateMortonInterleave(4, 2),
+    GenerateMortonInterleave(5, 2),
+    GenerateMortonInterleave(6, 2),
+    GenerateMortonInterleave(7, 2),
+
+    GenerateMortonInterleave(0, 3),
+    GenerateMortonInterleave(1, 3),
+    GenerateMortonInterleave(2, 3),
+    GenerateMortonInterleave(3, 3),
+    GenerateMortonInterleave(4, 3),
+    GenerateMortonInterleave(5, 3),
+    GenerateMortonInterleave(6, 3),
+    GenerateMortonInterleave(7, 3),
+
+    GenerateMortonInterleave(0, 4),
+    GenerateMortonInterleave(1, 4),
+    GenerateMortonInterleave(2, 4),
+    GenerateMortonInterleave(3, 4),
+    GenerateMortonInterleave(4, 4),
+    GenerateMortonInterleave(5, 4),
+    GenerateMortonInterleave(6, 4),
+    GenerateMortonInterleave(7, 4),
+
+    GenerateMortonInterleave(0, 5),
+    GenerateMortonInterleave(1, 5),
+    GenerateMortonInterleave(2, 5),
+    GenerateMortonInterleave(3, 5),
+    GenerateMortonInterleave(4, 5),
+    GenerateMortonInterleave(5, 5),
+    GenerateMortonInterleave(6, 5),
+    GenerateMortonInterleave(7, 5),
+
+    GenerateMortonInterleave(0, 6),
+    GenerateMortonInterleave(1, 6),
+    GenerateMortonInterleave(2, 6),
+    GenerateMortonInterleave(3, 6),
+    GenerateMortonInterleave(4, 6),
+    GenerateMortonInterleave(5, 6),
+    GenerateMortonInterleave(6, 6),
+    GenerateMortonInterleave(7, 6),
+
+    GenerateMortonInterleave(0, 7),
+    GenerateMortonInterleave(1, 7),
+    GenerateMortonInterleave(2, 7),
+    GenerateMortonInterleave(3, 7),
+    GenerateMortonInterleave(4, 7),
+    GenerateMortonInterleave(5, 7),
+    GenerateMortonInterleave(6, 7),
+    GenerateMortonInterleave(7, 7),
+};
+
+static constexpr inline u32 MortonInterleave(u32 x, u32 y) {
+    return MortonLUT[(x & 7) + ((y & 7) * 8)];
 }
 
 /**

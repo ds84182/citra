@@ -347,12 +347,16 @@ CachedSurface* RasterizerCacheOpenGL::GetSurface(const CachedSurface& params, bo
                 tex_info.SetDefaultStride();
                 tex_info.physical_address = params.addr;
 
+#if 1
+                Pica::Texture::DecodeRGBA8(texture_src_data, tex_buffer.data(), tex_info);
+#else
                 for (unsigned y = 0; y < params.height; ++y) {
                     for (unsigned x = 0; x < params.width; ++x) {
                         tex_buffer[x + params.width * y] = Pica::Texture::LookupTexture(
                             texture_src_data, x, params.height - 1 - y, tex_info);
                     }
                 }
+#endif
 
                 glTexImage2D(GL_TEXTURE_2D, 0, tuple.internal_format, params.width, params.height,
                              0, GL_RGBA, GL_UNSIGNED_BYTE, tex_buffer.data());

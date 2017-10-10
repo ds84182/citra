@@ -212,6 +212,95 @@ Math::Vec4<u8> LookupTexelInTile(const u8* source, unsigned int x, unsigned int 
     }
 }
 
+template <typename TileHandler>
+void DecodeTiles(const u8* source, const TextureInfo& info, const TileHandler& tileHandler) {
+    const u8* tile = source;
+
+    const unsigned int tile_width = info.width / 8;
+    const unsigned int tile_height = info.height / 8;
+
+    for (unsigned int tile_y = 0; tile_y < tile_height; tile_y++) {
+        for (unsigned int tile_x = 0; tile_x < tile_width; tile_x++) {
+            tileHandler(tile_x, tile_y, tile);
+            tile += CalculateTileSize(info.format);
+        }
+    }
+}
+
+template <typename ToRGBA8>
+void DecodeToRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info, const ToRGBA8& toRGBA8) {
+    DecodeTiles(source, info, [&](unsigned int tile_x, unsigned int tile_y, const u8* tile) {
+        for (unsigned int i = 0; i<8 * 8; i++) {
+            auto interleveOffset = VideoCore::MortonLUT[i];
+
+            auto x = (i % 8) + (tile_x * 8);
+            auto y = info.height - 1 - ((i / 8) + (tile_y * 8));
+
+            dest[y * info.width + x] = toRGBA8(tile, interleveOffset);
+        }
+    });
+}
+
+void DecodeRGBA8(const u8* source, Math::Vec4<u8>* dest, const TextureInfo& info) {
+    switch (info.format) {
+    case TextureFormat::RGBA8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) {
+            return Color::DecodeRGBA8(tile + offset * 4);
+        });
+        break;
+    case TextureFormat::RGB8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) {
+            return Color::DecodeRGB8(tile + offset * 3);
+        });
+        break;
+    case TextureFormat::RGB5A1:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) {
+            return Color::DecodeRGB5A1(tile + offset * 2);
+        });
+        break;
+    case TextureFormat::RGB565:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) {
+            return Color::DecodeRGB565(tile + offset * 2);
+        });
+        break;
+    case TextureFormat::RGBA4:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) {
+            return Color::DecodeRGBA4(tile + offset * 2);
+        });
+        break;
+    case TextureFormat::IA8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) -> Math::Vec4<u8> {
+            auto source_ptr = tile + offset * 2;
+            return {source_ptr[1], source_ptr[1], source_ptr[1], source_ptr[0]};
+        });
+        break;
+    case TextureFormat::RG8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) -> Math::Vec4<u8> {
+            auto res = Color::DecodeRG8(tile + offset * 2);
+            return {res.r(), res.g(), 0, 255};
+        });
+        break;
+    case TextureFormat::I8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) -> Math::Vec4<u8> {
+            auto source_ptr = tile + offset;
+            return {*source_ptr, *source_ptr, *source_ptr, 255};
+        });
+        break;
+    case TextureFormat::A8:
+        DecodeToRGBA8(source, dest, info, [](const u8* tile, u32 offset) -> Math::Vec4<u8> {
+            auto source_ptr = tile + offset;
+            return {0, 0, 0, *source_ptr};
+        });
+        break;
+    default:
+        for (unsigned y = 0; y < info.height; ++y) {
+            for (unsigned x = 0; x < info.width; ++x) {
+                dest[x + info.width * y] = Pica::Texture::LookupTexture(source, x, info.height - 1 - y, info);
+            }
+        }
+    }
+}
+
 TextureInfo TextureInfo::FromPicaRegister(const TexturingRegs::TextureConfig& config,
                                           const TexturingRegs::TextureFormat& format) {
     TextureInfo info;
