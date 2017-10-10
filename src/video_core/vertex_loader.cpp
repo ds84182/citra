@@ -70,6 +70,34 @@ void VertexLoader::Setup(const PipelineRegs& regs) {
     is_setup = true;
 }
 
+static void FillDefaultValues(float output[4], unsigned int count) {
+    // Default attribute values set if array elements have < 4 components. This
+    // is *not* carried over from the default attribute settings even if they're
+    // enabled for this attribute.
+
+    // This switch prevents major compilers (MSVC and Clang) from generating a
+    // bunch of complicated SSE instructions for a simple loop.
+
+    switch (count) {
+    case 0:
+        output[0] = 0.0f;
+    case 1:
+        output[1] = 0.0f;
+    case 2:
+        output[2] = 0.0f;
+    case 3:
+        output[3] = 1.0f;
+    }
+}
+
+template <typename T>
+static void LoadAttribute(const T * __restrict input, float * __restrict output, unsigned int count) {
+    for (unsigned int i = 0; i<4; i++) {
+        output[i] = static_cast<float>(input[i]);
+    }
+    FillDefaultValues(output, count);
+}
+
 void VertexLoader::LoadVertex(u32 base_address, int index, int vertex,
                               Shader::AttributeBuffer& input,
                               DebugUtils::MemoryAccessTracker& memory_accesses) {
@@ -97,43 +125,27 @@ void VertexLoader::LoadVertex(u32 base_address, int index, int vertex,
             case PipelineRegs::VertexAttributeFormat::BYTE: {
                 const s8* srcdata =
                     reinterpret_cast<const s8*>(Memory::GetPhysicalPointer(source_addr));
-                for (unsigned int comp = 0; comp < vertex_attribute_elements[i]; ++comp) {
-                    input.attr[i][comp] = float24::FromFloat32(srcdata[comp]);
-                }
+                LoadAttribute<s8>(srcdata, reinterpret_cast<float*>(&input.attr[i]), vertex_attribute_elements[i]);
                 break;
             }
             case PipelineRegs::VertexAttributeFormat::UBYTE: {
                 const u8* srcdata =
                     reinterpret_cast<const u8*>(Memory::GetPhysicalPointer(source_addr));
-                for (unsigned int comp = 0; comp < vertex_attribute_elements[i]; ++comp) {
-                    input.attr[i][comp] = float24::FromFloat32(srcdata[comp]);
-                }
+                LoadAttribute<u8>(srcdata, reinterpret_cast<float*>(&input.attr[i]), vertex_attribute_elements[i]);
                 break;
             }
             case PipelineRegs::VertexAttributeFormat::SHORT: {
                 const s16* srcdata =
                     reinterpret_cast<const s16*>(Memory::GetPhysicalPointer(source_addr));
-                for (unsigned int comp = 0; comp < vertex_attribute_elements[i]; ++comp) {
-                    input.attr[i][comp] = float24::FromFloat32(srcdata[comp]);
-                }
+                LoadAttribute<s16>(srcdata, reinterpret_cast<float*>(&input.attr[i]), vertex_attribute_elements[i]);
                 break;
             }
             case PipelineRegs::VertexAttributeFormat::FLOAT: {
                 const float* srcdata =
                     reinterpret_cast<const float*>(Memory::GetPhysicalPointer(source_addr));
-                for (unsigned int comp = 0; comp < vertex_attribute_elements[i]; ++comp) {
-                    input.attr[i][comp] = float24::FromFloat32(srcdata[comp]);
-                }
+                LoadAttribute<float>(srcdata, reinterpret_cast<float*>(&input.attr[i]), vertex_attribute_elements[i]);
                 break;
             }
-            }
-
-            // Default attribute values set if array elements have < 4 components. This
-            // is *not* carried over from the default attribute settings even if they're
-            // enabled for this attribute.
-            for (unsigned int comp = vertex_attribute_elements[i]; comp < 4; ++comp) {
-                input.attr[i][comp] =
-                    comp == 3 ? float24::FromFloat32(1.0f) : float24::FromFloat32(0.0f);
             }
 
             LOG_TRACE(HW_GPU, "Loaded %d components of attribute %x for vertex %x (index %x) from "
