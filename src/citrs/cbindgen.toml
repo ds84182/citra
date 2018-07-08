@@ -1,0 +1,2 @@
+namespaces = ["citrs"]
+header = "#pragma once"

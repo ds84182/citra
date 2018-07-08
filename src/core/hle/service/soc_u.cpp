@@ -11,11 +11,17 @@
 #include "common/common_types.h"
 #include "common/logging/log.h"
 #include "common/scope_exit.h"
+#include "core/hle/lock.h"
 #include "core/hle/ipc.h"
+#include "core/hle/ipc_helpers.h"
+#include "core/hle/kernel/event.h"
 #include "core/hle/kernel/server_session.h"
+#include "core/hle/kernel/shared_memory.h"
 #include "core/hle/result.h"
 #include "core/hle/service/soc_u.h"
 #include "core/memory.h"
+
+#include "citrs/citrs.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -896,8 +902,295 @@ const Interface::FunctionInfo FunctionTable[] = {
     {0x00230040, nullptr, "AddGlobalSocket"},
 };
 
-SOC_U::SOC_U() {
-    Register(FunctionTable);
+using namespace citrs;
+
+void SOC_U::InitializeSockets(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x01, 1, 4);
+
+    u32 sharedmem_size = rp.Pop<u32>();
+    rp.PopPID();
+    rp.PopObject<Kernel::SharedMemory>();
+
+    LOG_CRITICAL(Service_SOC, "SOC Init");
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(1, 0);
+    rb.Push(RESULT_SUCCESS);
+}
+
+void SOC_U::Socket(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x02, 3, 2);
+
+    u32 domain = rp.Pop<u32>();
+    u32 type = rp.Pop<u32>();
+    u32 protocol = rp.Pop<u32>();
+
+    rp.PopPID();
+
+    u32 sock = static_cast<u32>(citrs_socu_socket(context));
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(0);
+    rb.Push(sock);
+}
+
+void SOC_U::Listen(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x03, 2, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 backlog = rp.Pop<u32>();
+    rp.PopPID();
+
+    u32 retval = static_cast<u32>(citrs_socu_listen(context, sockfd));
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(0);
+    rb.Push(retval);
+}
+
+static constexpr std::chrono::nanoseconds no_timeout{ UINT64_MAX };
+
+void SOC_U::Accept(Kernel::HLERequestContext& ctx) {
+    u32* cmd_buffer = Kernel::GetCommandBuffer();
+
+    IPC::RequestParser rp(ctx, 0x04, 2, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 max_addr_len = rp.Pop<u32>();
+    rp.PopPID();
+
+    s32 sync_result;
+    std::vector<u8> addr_bytes(sizeof(CTRSockAddr));
+    CTRSockAddr &addr = *reinterpret_cast<CTRSockAddr*>(addr_bytes.data());
+    addr.in.len = sizeof(CTRSockAddr::CTRSockAddrIn);
+    addr.in.sin_family = AF_INET;
+
+    if (citrs_socu_try_accept(context, sockfd, &sync_result, reinterpret_cast<u8(*)[4]>(&addr.in.sin_addr), &addr.in.sin_port)) {
+        IPC::RequestBuilder rb(ctx, 0x04, 2, 2);
+        rb.Push<u32>(0);
+        rb.Push(static_cast<u32>(sync_result));
+        rb.PushStaticBuffer(std::move(addr_bytes), 0);
+        return;
+    }
+
+    auto result_handle = citrs_socu_prepare_async_result(context);
+
+    auto event = ctx.SleepClientThread(
+        Kernel::GetCurrentThread(),
+        "socu::Accept",
+        no_timeout,
+        [=, addr_bytes = std::move(addr_bytes)](Kernel::SharedPtr<Kernel::Thread> thread, Kernel::HLERequestContext& ctx, ThreadWakeupReason reason) mutable {
+            IPC::RequestBuilder rb(ctx, 0x04, 2, 2);
+            rb.Push<u32>(0);
+            CTRSockAddr &addr = *reinterpret_cast<CTRSockAddr*>(addr_bytes.data());
+            rb.Push(static_cast<u32>(citrs_socu_consume_accept(context, result_handle, reinterpret_cast<u8(*)[4]>(&addr.in.sin_addr), &addr.in.sin_port)));
+            rb.PushStaticBuffer(std::move(addr_bytes), 0);
+        }
+    );
+
+    auto detached = event.detach();
+    citrs_socu_accept_async(context, sockfd, reinterpret_cast<citrs::HLEResumeToken*>(detached), result_handle);
+}
+
+void SOC_U::Bind(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x05, 2, 4);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 addr_len = rp.Pop<u32>();
+    rp.PopPID();
+    auto buffer = rp.PopStaticBuffer();
+    const CTRSockAddr *ctr_sock_addr = reinterpret_cast<const CTRSockAddr*>(buffer.data());
+
+    u32 retval = static_cast<u32>(citrs_socu_bind(context, sockfd, ctr_sock_addr->in.sin_addr, htons(ctr_sock_addr->in.sin_port)));
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(0);
+    rb.Push(retval);
+}
+
+void SOC_U::RecvFrom(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x08, 4, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 len = rp.Pop<u32>();
+    u32 flags = rp.Pop<u32>();
+    u32 addr_len = rp.Pop<u32>();
+    rp.PopPID();
+
+    auto soc_buffer = std::make_shared<std::vector<u8>>(static_cast<size_t>(len), 0);
+    u8 *soc_buffer_addr = soc_buffer->data();
+
+    s32 sync_result;
+    size_t sync_bytes;
+    if (citrs_socu_try_recv(context, sockfd, soc_buffer_addr, len, &sync_result, &sync_bytes)) {
+        IPC::RequestBuilder rb(ctx, 0x08, 3, 2);
+        rb.Push<u32>(0);
+        rb.Push(static_cast<u32>(sync_result));
+        rb.Push(static_cast<u32>(sync_bytes));
+        rb.PushStaticBuffer(*soc_buffer.get(), 0);
+        return;
+    }
+
+    auto result_handle = citrs_socu_prepare_async_result(context);
+
+    auto event = ctx.SleepClientThread(
+        Kernel::GetCurrentThread(),
+        "socu::RecvFrom",
+        no_timeout,
+        [=, soc_buffer = std::move(soc_buffer)](Kernel::SharedPtr<Kernel::Thread> thread, Kernel::HLERequestContext& ctx, ThreadWakeupReason reason) mutable {
+            IPC::RequestBuilder rb(ctx, 0x08, 3, 2);
+            rb.Push<u32>(0);
+            size_t recv_size;
+            rb.Push(static_cast<u32>(citrs_socu_consume_read(context, result_handle, &recv_size)));
+            rb.Push(static_cast<u32>(recv_size));
+            rb.PushStaticBuffer(*soc_buffer.get(), 0);
+        }
+    );
+
+    auto detached = event.detach();
+    citrs_socu_recv(context, sockfd, reinterpret_cast<citrs::HLEResumeToken*>(detached), result_handle, soc_buffer_addr, len);
+}
+
+void SOC_U::SendTo(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x0A, 4, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 len = rp.Pop<u32>();
+    u32 flags = rp.Pop<u32>();
+    u32 addr_len = rp.Pop<u32>();
+    rp.PopPID();
+
+    auto soc_buffer = std::make_shared<std::vector<u8>>(std::move(rp.PopStaticBuffer()));
+    u8 *soc_buffer_addr = soc_buffer->data();
+
+    auto result_handle = citrs_socu_prepare_async_result(context);
+
+    auto event = ctx.SleepClientThread(
+        Kernel::GetCurrentThread(),
+        "socu::SendTo",
+        no_timeout,
+        [=, soc_buffer = std::move(soc_buffer)](Kernel::SharedPtr<Kernel::Thread> thread, Kernel::HLERequestContext& ctx, ThreadWakeupReason reason) mutable {
+            IPC::RequestBuilder rb(ctx, 0x0A, 3, 0);
+            rb.Push<u32>(0);
+            size_t recv_size;
+            rb.Push(static_cast<u32>(citrs_socu_consume_read(context, result_handle, &recv_size)));
+            rb.Push(static_cast<u32>(recv_size));
+        }
+    );
+
+    auto detached = event.detach();
+    citrs_socu_send(context, sockfd, reinterpret_cast<citrs::HLEResumeToken*>(detached), result_handle, soc_buffer_addr, len);
+}
+
+void SOC_U::Close(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x0B, 1, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    rp.PopPID();
+
+    u32 retval = static_cast<u32>(citrs_socu_close(context, sockfd));
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(0);
+    rb.Push(retval);
+}
+
+void SOC_U::Fcntl(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x13, 3, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 cmd = rp.Pop<u32>();
+    u32 arg = rp.Pop<u32>();
+    rp.PopPID();
+
+    u32 result_code = 0;
+    u32 posix_return_code;
+
+    if (cmd == 3) { // F_GETFL
+        bool non_blocking;
+        posix_return_code = citrs_socu_get_non_blocking(context, sockfd, &non_blocking);
+        if (posix_return_code == 0) {
+            posix_return_code = non_blocking ? 0x4 : 0; // O_NONBLOCK
+        }
+    } else if (cmd == 4) { // F_SETFL
+        bool non_blocking = arg & 0x4; // O_NONBLOCK
+        posix_return_code = citrs_socu_set_non_blocking(context, sockfd, non_blocking);
+    } else {
+        posix_return_code = -28; // EINVAL
+    }
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(result_code);
+    rb.Push(posix_return_code);
+}
+
+void SOC_U::GetHostID(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x16, 0, 0);
+
+    char name[128];
+    gethostname(name, sizeof(name));
+    addrinfo hints = {};
+    addrinfo* res;
+
+    hints.ai_family = AF_INET;
+    getaddrinfo(name, nullptr, &hints, &res);
+    sockaddr_in* sock_addr = reinterpret_cast<sockaddr_in*>(res->ai_addr);
+    in_addr* addr = &sock_addr->sin_addr;
+    u32 out_addr = addr->s_addr;
+    freeaddrinfo(res);
+
+    IPC::RequestBuilder rb = rp.MakeBuilder(2, 0);
+    rb.Push<u32>(0);
+    rb.Push(out_addr);
+}
+
+extern "C" void citra_socu_unpark(citrs::HLEResumeToken *token) {
+    LOG_WARNING(Service_SOC, "Unparked");
+    std::lock_guard<std::recursive_mutex> lock(HLE::g_hle_lock);
+    Kernel::SharedPtr<Kernel::Event> sp(reinterpret_cast<Kernel::Event*>(token), false);
+    sp->Signal();
+}
+
+SOC_U::SOC_U() : ServiceFramework("soc:U") {
+    const FunctionInfo FunctionTable[] = {
+        {0x00010044, &SOC_U::InitializeSockets, "InitializeSockets"},
+        {0x000200C2, &SOC_U::Socket, "Socket"},
+        {0x00030082, &SOC_U::Listen, "Listen"},
+        {0x00040082, &SOC_U::Accept, "Accept"},
+        {0x00050084, &SOC_U::Bind, "Bind"},
+        {0x00060084, nullptr, "Connect"},
+        {0x00070104, nullptr, "recvfrom_other"},
+        {0x00080102, &SOC_U::RecvFrom, "RecvFrom"},
+        {0x00090106, nullptr, "sendto_other"},
+        {0x000A0106, &SOC_U::SendTo, "SendTo"},
+        {0x000B0042, &SOC_U::Close, "Close"},
+        {0x000C0082, nullptr, "Shutdown"},
+        {0x000D0082, nullptr, "GetHostByName"},
+        {0x000E00C2, nullptr, "GetHostByAddr"},
+        {0x000F0106, nullptr, "GetAddrInfo"},
+        {0x00100102, nullptr, "GetNameInfo"},
+        {0x00110102, nullptr, "GetSockOpt"},
+        {0x00120104, nullptr, "SetSockOpt"},
+        {0x001300C2, &SOC_U::Fcntl, "Fcntl"},
+        {0x00140084, nullptr, "Poll"},
+        {0x00150042, nullptr, "SockAtMark"},
+        {0x00160000, nullptr, "GetHostId"},
+        {0x00170082, nullptr, "GetSockName"},
+        {0x00180082, nullptr, "GetPeerName"},
+        {0x00190000, nullptr, "ShutdownSockets"},
+        {0x001A00C0, nullptr, "GetNetworkOpt"},
+        {0x001B0040, nullptr, "ICMPSocket"},
+        {0x001C0104, nullptr, "ICMPPing"},
+        {0x001D0040, nullptr, "ICMPCancel"},
+        {0x001E0040, nullptr, "ICMPClose"},
+        {0x001F0040, nullptr, "GetResolverInfo"},
+        {0x00210002, nullptr, "CloseSockets"},
+        {0x00230040, nullptr, "AddGlobalSocket"},
+    };
+
+    // Register(FunctionTable);
+    context = citrs_socu_init();
+
+    RegisterHandlers(FunctionTable);
 
 #ifdef _WIN32
     WSADATA data;
@@ -906,10 +1199,15 @@ SOC_U::SOC_U() {
 }
 
 SOC_U::~SOC_U() {
-    CleanupSockets();
+    // CleanupSockets();
+    citrs_socu_exit(context);
 #ifdef _WIN32
     WSACleanup();
 #endif
+}
+
+void InstallInterfaces(SM::ServiceManager& service_manager) {
+    std::make_shared<SOC_U>()->InstallAsService(service_manager);
 }
 
 } // namespace SOC

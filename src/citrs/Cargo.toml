@@ -1,0 +1,21 @@
+[package]
+name = "citrs"
+version = "0.1.0"
+authors = []
+
+[lib]
+name = "citrs"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+slab = "0.4"
+quick-error = "1.2"
+mio = "0.6"
+parking_lot = "0.5"
+iovec = "0.1"
+enum-primitive-derive = "0.1"
+num-traits = "0.1"
+socket2 = "0.3"
+
+[build-dependencies]
+cbindgen = "0.6"
