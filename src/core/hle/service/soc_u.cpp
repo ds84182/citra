@@ -933,6 +933,43 @@ void SOC_U::Socket(Kernel::HLERequestContext& ctx) {
     rb.Push(sock);
 }
 
+static constexpr std::chrono::nanoseconds no_timeout{ UINT64_MAX };
+
+void SOC_U::Connect(Kernel::HLERequestContext& ctx) {
+    IPC::RequestParser rp(ctx, 0x06, 2, 2);
+
+    u32 sockfd = rp.Pop<u32>();
+    u32 addrlen = rp.Pop<u32>();
+    rp.PopPID();
+
+    auto buffer = rp.PopStaticBuffer();
+    const CTRSockAddr *addr = reinterpret_cast<const CTRSockAddr*>(buffer.data());
+    s32 sync_result = 0;
+
+    if (citrs_socu_start_connect(context, sockfd, addr->in.sin_addr, htons(addr->in.sin_port), &sync_result)) {
+        IPC::RequestBuilder rb(ctx, 0x06, 2, 0);
+        rb.Push<u32>(0);
+        rb.Push(static_cast<u32>(sync_result));
+        return;
+    }
+
+    auto result_handle = citrs_socu_prepare_async_result(context);
+
+    auto event = ctx.SleepClientThread(
+        Kernel::GetCurrentThread(),
+        "socu::Connect",
+        no_timeout,
+        [=](Kernel::SharedPtr<Kernel::Thread> thread, Kernel::HLERequestContext& ctx, ThreadWakeupReason reason) mutable {
+            IPC::RequestBuilder rb(ctx, 0x06, 2, 0);
+            rb.Push<u32>(0);
+            rb.Push(static_cast<u32>(citrs_socu_consume(context, result_handle)));
+        }
+    );
+
+    auto detached = event.detach();
+    citrs_socu_continue_connect_async(context, sockfd, reinterpret_cast<citrs::HLEResumeToken*>(detached), result_handle);
+}
+
 void SOC_U::Listen(Kernel::HLERequestContext& ctx) {
     IPC::RequestParser rp(ctx, 0x03, 2, 2);
 
@@ -946,8 +983,6 @@ void SOC_U::Listen(Kernel::HLERequestContext& ctx) {
     rb.Push<u32>(0);
     rb.Push(retval);
 }
-
-static constexpr std::chrono::nanoseconds no_timeout{ UINT64_MAX };
 
 void SOC_U::Accept(Kernel::HLERequestContext& ctx) {
     u32* cmd_buffer = Kernel::GetCommandBuffer();
@@ -1157,7 +1192,7 @@ SOC_U::SOC_U() : ServiceFramework("soc:U") {
         {0x00030082, &SOC_U::Listen, "Listen"},
         {0x00040082, &SOC_U::Accept, "Accept"},
         {0x00050084, &SOC_U::Bind, "Bind"},
-        {0x00060084, nullptr, "Connect"},
+        {0x00060084, &SOC_U::Connect, "Connect"},
         {0x00070104, nullptr, "recvfrom_other"},
         {0x00080102, &SOC_U::RecvFrom, "RecvFrom"},
         {0x00090106, nullptr, "sendto_other"},

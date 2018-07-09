@@ -22,6 +22,7 @@ public:
 private:
   void InitializeSockets(Kernel::HLERequestContext& ctx);
   void Socket(Kernel::HLERequestContext& ctx);
+  void Connect(Kernel::HLERequestContext& ctx);
   void Listen(Kernel::HLERequestContext& ctx);
   void Accept(Kernel::HLERequestContext& ctx);
   void Bind(Kernel::HLERequestContext& ctx);

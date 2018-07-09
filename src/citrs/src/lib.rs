@@ -100,7 +100,7 @@ pub trait CTRSock: Sized {
     /// Continues the connection process asynchronously with an HLE handle.
     ///
     /// Must be called directly after start_connect if it returns Ok(false).
-    fn continue_connect_async(&mut self, op: &mut SOCOperations, pending: PendingResultHandle) -> Result<(), CTRSockError>;
+    fn continue_connect_async(&mut self, sock: i32, op: &mut SOCOperations, pending: PendingResultHandle) -> Result<(), CTRSockError>;
 
     /// Binds the socket for listening on the specified port and address.
     fn bind(&mut self, addr: &SocketAddr) -> Result<(), CTRSockError>;
@@ -224,7 +224,7 @@ impl CTRSock for CTRSockTcp {
         }
     }
 
-    fn continue_connect_async(&mut self, op: &mut SOCOperations, pending: PendingResultHandle) -> Result<(), CTRSockError> {
+    fn continue_connect_async(&mut self, sock: i32, op: &mut SOCOperations, pending: PendingResultHandle) -> Result<(), CTRSockError> {
         match mem::replace(self, CTRSockTcp::Undefined) {
             CTRSockTcp::ConnectBlockPendingAsync { ref tcp } => {
                 let tcp_ref = tcp.clone();
@@ -233,7 +233,8 @@ impl CTRSock for CTRSockTcp {
                     let token = op.register(tcp, SOCOpQueue::Connect(
                         SOCOpConnectQueue {
                             tcp: Arc::downgrade(&tcp_ref),
-                            pending
+                            pending,
+                            sock
                         }
                     ))?;
                     op.request_write(tcp, token)?;
@@ -423,13 +424,14 @@ impl CTRSock for CTRSockTcp {
 }
 
 impl CTRSockTcp {
-    fn new_stream(sock: TcpStream, op: &mut SOCOperations) -> io::Result<CTRSockTcp> {
-        let sock = Arc::new(sock);
+    fn make_stream<F>(sock: Arc<TcpStream>, register_queue_fn: F) -> io::Result<CTRSockTcp>
+    where F: FnOnce(&TcpStream, SOCOpQueue) -> io::Result<mio::Token>
+    {
         let inflight_reads = InFlightRequestCounter::new();
         let (reads, reads_recv) = mpsc::sync_channel(32);
         let inflight_writes = InFlightRequestCounter::new();
         let (writes, writes_recv) = mpsc::sync_channel(32);
-        let token = op.register(
+        let token = register_queue_fn(
             sock.deref(),
             SOCOpQueue::Stream(SOCOpStreamQueue {
                 tcp: Arc::downgrade(&sock),
@@ -449,6 +451,12 @@ impl CTRSockTcp {
             reads,
             inflight_writes,
             writes
+        })
+    }
+
+    fn new_stream(sock: TcpStream, op: &mut SOCOperations) -> io::Result<CTRSockTcp> {
+        Self::make_stream(Arc::new(sock), |evented, queue| {
+            op.register(evented, queue)
         })
     }
 }
@@ -750,8 +758,10 @@ impl SOCOpStreamQueue {
 struct SOCOpConnectQueue {
     tcp: Weak<TcpStream>,
     pending: PendingResultHandle,
+    sock: i32
 }
 
+#[derive(Debug, Copy, Clone)]
 enum SOCOpQueueType {
     Listener, Stream, Connect
 }
@@ -805,6 +815,7 @@ impl SOCOperations {
 
     fn request_read<E: mio::Evented>(&self, evented: &E, token: mio::Token) -> io::Result<()> {
         let mut queue = self.queue_at(token).lock();
+        let queue_type = queue.queue_type();
         if let &mut SOCOpQueue::Stream(SOCOpStreamQueue { ref mut requesting, .. }) = queue.deref_mut() {
             if requesting.is_readable() {
                 // Nothing to do
@@ -814,22 +825,27 @@ impl SOCOperations {
                 self.poll.reregister(evented, token, *requesting, mio::PollOpt::oneshot() | mio::PollOpt::edge())
             }
         } else {
-            panic!("Cannot request to read something that isn't a stream!")
+            panic!("Cannot request to read something that isn't a stream! {:?}", queue_type)
         }
     }
 
     fn request_write<E: mio::Evented>(&self, evented: &E, token: mio::Token) -> io::Result<()> {
         let mut queue = self.queue_at(token).lock();
-        if let &mut SOCOpQueue::Stream(SOCOpStreamQueue { ref mut requesting, .. }) = queue.deref_mut() {
-            if requesting.is_writable() {
-                // Nothing to do
-                Ok(())
-            } else {
-                *requesting |= mio::Ready::writable();
-                self.poll.reregister(evented, token, *requesting, mio::PollOpt::oneshot() | mio::PollOpt::edge())
-            }
-        } else {
-            panic!("Cannot request to read something that isn't a stream!")
+        let queue_type = queue.queue_type();
+        match queue.deref_mut() {
+            &mut SOCOpQueue::Stream(SOCOpStreamQueue { ref mut requesting, .. }) => {
+                if requesting.is_writable() {
+                    // Nothing to do
+                    Ok(())
+                } else {
+                    *requesting |= mio::Ready::writable();
+                    self.poll.reregister(evented, token, *requesting, mio::PollOpt::oneshot() | mio::PollOpt::edge())
+                }
+            },
+            &mut SOCOpQueue::Connect(SOCOpConnectQueue { .. }) => {
+                self.poll.reregister(evented, token, mio::Ready::writable(), mio::PollOpt::oneshot() | mio::PollOpt::edge())
+            },
+            _ => panic!("Cannot request to write something that isn't a stream! {:?}", queue_type)
         }
     }
 }
@@ -1079,18 +1095,41 @@ impl SOCUContext {
                             }
                         },
                         SOCOpQueueType::Connect => {
-                            if let SOCOpQueue::Connect(queue) = ops_guard.queue_at(token).lock().deref() {
+                            let maybe_tcp = if let SOCOpQueue::Connect(queue) = ops_guard.queue_at(token).lock().deref() {
                                 let tcp = queue.tcp.upgrade().expect("Invalid state for listener queue");
                                 match tcp.take_error() {
                                     Ok(None) => {
-                                        panic!("Ok, the socket connected.");
+                                        // This data is needed to convert the socket from a blocking connection to a stream.
+                                        Some((tcp.clone(), queue.sock, queue.pending.index))
                                     },
                                     Ok(Some(err)) => {
-                                        panic!("Ok, the socket didn't connect? {:?}", err);
+                                        results.complete(queue.pending.index, CTRSockError::from(err).to_ctr_posix_result());
+                                        None
                                     },
                                     Err(err) => {
-                                        panic!("Ok, we failed to get the error? {:?}", err);
+                                        results.complete(queue.pending.index, CTRSockError::from(err).to_ctr_posix_result());
+                                        None
                                     }
+                                }
+                            } else {
+                                unreachable!()
+                            };
+
+                            if let Some((tcp, sockfd, pending_index)) = maybe_tcp {
+                                if let Some((sock, _opt)) = deref_opt(&sockets.write().socket_at(sockfd)) {
+                                    // Upgrade the socket to a stream, and then upgrade the queue to a stream
+                                    match CTRSockTcp::make_stream(tcp.clone(), |_evented, queue| {
+                                        // Evented is already registered, so just replace our queue and return our token
+                                        *ops_guard.queue_at(token).lock() = queue;
+                                        Ok(token)
+                                    }) {
+                                        Ok(new_sock) => *sock.write() = new_sock,
+                                        Err(err) => panic!("Failed to convert into socket: {:?}", err)
+                                    }
+
+                                    results.complete(pending_index, 0);
+                                } else {
+                                    panic!("Socket not found by FD? Maybe file descriptor raced and got closed? TODO: Figure out what to do here")
                                 }
                             }
                         }
@@ -1142,6 +1181,56 @@ pub extern fn citrs_socu_get_non_blocking(ctx: &mut SOCUContext, sock: i32, non_
         0
     } else {
         -socu::ErrorCode::BadFD
+    }
+}
+
+#[no_mangle]
+pub extern fn citrs_socu_start_connect(ctx: &mut SOCUContext, sock: i32, address: u32, port: u16, posix_result: &mut i32) -> bool {
+    if let Some((sock, opt)) = deref_opt(&ctx.sockets.read().socket_at(sock)) {
+        // Assemble IP Address
+        let address = Ipv4Addr::new(
+            ((address & 0x000000FF) >>  0) as u8,
+            ((address & 0x0000FF00) >>  8) as u8,
+            ((address & 0x00FF0000) >> 16) as u8,
+            ((address & 0xFF000000) >> 24) as u8,
+        );
+
+        let address = SocketAddr::new(IpAddr::V4(address), port);
+
+        match sock.write().start_connect(&mut ctx.ops.write(), &address, opt.into()) {
+            Ok(Async::Ready(_)) => {
+                *posix_result = 0;
+                true
+            },
+            Ok(Async::ShouldPark) => false,
+            Err(err) => {
+                *posix_result = err.to_ctr_posix_result();
+                true
+            }
+        }
+    } else {
+        *posix_result = -socu::ErrorCode::BadFD;
+        true
+    }
+}
+
+#[no_mangle]
+pub extern fn citrs_socu_continue_connect_async(ctx: &mut SOCUContext, sock_id: i32, token: &'static mut HLEResumeToken, result: usize) {
+    ctx.results.write().start_operation(result, token);
+    if let Some((sock, _opt)) = deref_opt(&ctx.sockets.write().socket_at(sock_id)) {
+        let pending = PendingResultHandle::new(result);
+        match sock.write().continue_connect_async(sock_id, &mut ctx.ops.write(), pending) {
+            Ok(..) => {},
+            Err(err) => {
+                // We can't unpark on the current thread else Citra breaks
+                let results = ctx.results.clone();
+                thread::spawn(move || {
+                    results.complete(result, err.to_ctr_posix_result());
+                });
+            },
+        }
+    } else {
+        panic!("Please call citrs_socu_start_connect before citrs_socu_continue_connect_async (socket not found)")
     }
 }
 

@@ -7,6 +7,10 @@ namespace citrs {
 
 static const uintptr_t SOC_COUNT = 64;
 
+// Non-instantiable type used to refer to HLE Resume Tokens from C++.
+//
+// These tokens are used to unpark the HLE thread on the C++ side using
+// citra_socu_unpark.
 struct HLEResumeToken;
 
 struct SOCUContext;
@@ -32,6 +36,11 @@ int32_t citrs_socu_consume_accept(SOCUContext *ctx,
                                   uint16_t *port);
 
 int32_t citrs_socu_consume_read(SOCUContext *ctx, uintptr_t result, uintptr_t *read_amount);
+
+void citrs_socu_continue_connect_async(SOCUContext *ctx,
+                                       int32_t sock,
+                                       HLEResumeToken *token,
+                                       uintptr_t result);
 
 void citrs_socu_exit(SOCUContext *ctx);
 
@@ -60,6 +69,12 @@ void citrs_socu_send(SOCUContext *ctx,
 int32_t citrs_socu_set_non_blocking(SOCUContext *ctx, int32_t sock, bool non_blocking);
 
 int32_t citrs_socu_socket(SOCUContext *ctx);
+
+bool citrs_socu_start_connect(SOCUContext *ctx,
+                              int32_t sock,
+                              uint32_t address,
+                              uint16_t port,
+                              int32_t *posix_result);
 
 bool citrs_socu_try_accept(SOCUContext *ctx,
                            int32_t sock,
