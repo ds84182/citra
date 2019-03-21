@@ -29,7 +29,7 @@ void Armos::Init() {
             nullptr
         };
 
-        execv("libarmos_trampoline", argv);
+        execv("libarmos_trampoline.so", argv);
     }
 
     // Wait until stop
