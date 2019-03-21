@@ -2,6 +2,8 @@ add_library(core STATIC
     3ds.h
     announce_multiplayer_session.cpp
     announce_multiplayer_session.h
+    arm/armos/armos.cpp
+    arm/armos/armos.h
     arm/arm_interface.h
     arm/dyncom/arm_dyncom.cpp
     arm/dyncom/arm_dyncom.h
@@ -460,3 +462,11 @@ if (ARCHITECTURE_x86_64)
     )
     target_link_libraries(core PRIVATE dynarmic)
 endif()
+
+add_executable(libarmos_trampoline.so
+    arm/armos/trampoline.cpp
+)
+set_target_properties(libarmos_trampoline.so PROPERTIES COMPILE_FLAGS "-ffreestanding -fno-stack-protector")
+set_target_properties(libarmos_trampoline.so PROPERTIES LINK_FLAGS "-nostartfiles")
+set_target_properties(libarmos_trampoline.so PROPERTIES LINKER_LANGUAGE C)
+add_dependencies(core libarmos_trampoline.so)
