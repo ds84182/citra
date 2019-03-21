@@ -11,6 +11,18 @@
 
 #include "common/logging/log.h"
 #include "core/arm/armos/trampoline_page.h"
+#include "core/memory.h"
+
+static int AllocateSharedMemory(size_t size) {
+    int fd = syscall(__NR_memfd_create, "citra-guest-struct", 0);
+    ftruncate(fd, size);
+    return fd;
+}
+
+static int ram_fd;
+static size_t ram_fd_size;
+static void *ram_mapping;
+static uintptr_t ram_bump_offset;
 
 class Armos::GuestContext {
 private:
@@ -23,15 +35,8 @@ public:
     GuestContext() = default;
 
     void Init() {
-        struct_fd = syscall(__NR_memfd_create, "citra-guest-struct", 0);
+        struct_fd = AllocateSharedMemory(kTrampolinePageSize);
 
-        // if (struct_fd < 0) {
-        //     // Doesn't support memfd, use shm instead
-        //     struct_fd = shm_open("citra-guest-struct", O_CREAT | O_RDWR | O_TRUNC, 0700);
-        // }
-
-        // Needs to be a page in size
-        ftruncate(struct_fd, kTrampolinePageSize);
         ts = reinterpret_cast<TrampolinePage*>(mmap(nullptr, kTrampolinePageSize, PROT_READ | PROT_WRITE, MAP_SHARED, struct_fd, 0));
 
         LOG_ERROR(Core_ARM11, "Mapped Guest Struct FD {} at {}", struct_fd, (void*)ts);
@@ -41,6 +46,10 @@ public:
         if (pid == 0) {
             // Child process
             dup2(struct_fd, kTrampolineSHM);
+            dup2(ram_fd, kMainMemSHM);
+
+            close(struct_fd);
+            close(ram_fd);
 
             char *const argv[] = {
                 "libarmos_trampoline",
@@ -102,9 +111,20 @@ private:
 };
 
 void Armos::Init() {
+    ram_fd_size = Memory::FCRAM_N3DS_SIZE + Memory::VRAM_SIZE + Memory::N3DS_EXTRA_RAM_SIZE;
+    ram_fd = AllocateSharedMemory(ram_fd_size);
+    ram_bump_offset = 0;
+    ram_mapping = mmap(nullptr, ram_fd_size, PROT_READ | PROT_WRITE, MAP_SHARED, ram_fd, 0);
+
     GuestContext ctx;
 
     ctx.Init();
 
     exit(1);
+}
+
+Armos::Region Armos::AllocateRegion(u32 size) {
+    uintptr_t offset = ram_bump_offset;
+    ram_bump_offset += size;
+    return Region(reinterpret_cast<u8*>(ram_mapping) + offset, offset);
 }

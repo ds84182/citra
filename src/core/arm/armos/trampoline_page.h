@@ -6,6 +6,7 @@ constexpr size_t kTrampolinePageSize = 4096;
 
 constexpr int kTrampolineSHM = 3;
 constexpr int kTrampolineCommandPipe = 4;
+constexpr int kMainMemSHM = 5;
 
 constexpr size_t kTrampolineStackSize = 4096;
 
