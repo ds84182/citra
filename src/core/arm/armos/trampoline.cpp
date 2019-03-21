@@ -13,7 +13,7 @@ static void *ipc_scratch_ram = nullptr;
 
 static void halt() {
     // Ready to go, stop again to allow the host to redirect execution
-    kill(getpid(), SIGSTOP);
+    raise(SIGSTOP);
 
     // Go into an infinite loop with a syscall
     while (true) {
@@ -60,9 +60,9 @@ extern "C" void _start(int argc, char *argv[]) {
 
     // Initialize the trampoline struct
     ts->trampoline_addr = static_cast<u32>(reinterpret_cast<uintptr_t>(&trampoline));
-    ts->trampoline_stack = static_cast<u32>(reinterpret_cast<uintptr_t>(mmap(nullptr, Armos::kTrampolineStackSize, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0)));
+    ts->trampoline_stack = static_cast<u32>(reinterpret_cast<uintptr_t>(mmap(nullptr, Armos::kTrampolineStackSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)));
 
-    ipc_scratch_ram = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS, -1, 0);
+    ipc_scratch_ram = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 
     // Init ptrace
 
@@ -70,7 +70,7 @@ extern "C" void _start(int argc, char *argv[]) {
     ts->tracing = true;
 
     // Wait for attach
-    kill(getpid(), SIGSTOP);
+    raise(SIGSTOP);
     ts->init = true;
 
     // Do other initialization here, if needed
