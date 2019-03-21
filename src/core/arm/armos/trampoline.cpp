@@ -23,11 +23,13 @@ static void halt() {
 
 static void set_tls(u32 tls) {
     u32 a1 = 0;
+
+    u32 tls_addr __asm__ ("r0") = tls;
+    u32 syscall_no __asm__ ("r7") = 0x0f0005;
     asm volatile(
         "swi 0x0"
-        : "={r0}" (a1)
-        : "{r7}"(0x0f0005) /* __ARM_NR_set_tls */,
-            "{r0}"(tls)
+        : "+r"(tls_addr)
+        : "r"(syscall_no) /* __ARM_NR_set_tls */
         : "memory"
     );
 }
