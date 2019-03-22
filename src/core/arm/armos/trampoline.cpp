@@ -13,12 +13,14 @@ static void *ipc_scratch_ram = nullptr;
 
 static void halt() {
     // Ready to go, stop again to allow the host to redirect execution
-    raise(SIGSTOP);
+    ts->latch.RaiseGuest();
+    ts->latch.WaitGuest();
 
     // Go into an infinite loop with a syscall
-    while (true) {
-        getpid();
-    }
+    raise(SIGSTOP);
+    constexpr char kInTrampolineMessage[] = "Waiting for syscall capture\n";
+    write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
+    while (true) raise(SIGCHLD);
 }
 
 static void set_tls(u32 tls) {
@@ -35,6 +37,11 @@ static void set_tls(u32 tls) {
 }
 
 static void trampoline() {
+    constexpr char kInTrampolineMessage[] = "In trampoline\n";
+    write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
+
+    ts->latch.RaiseGuest();
+
     // While in trampoline, reduce risk of clobbering guest's TLS
     set_tls(0);
 
@@ -43,9 +50,12 @@ static void trampoline() {
         s32 prev = __sync_fetch_and_sub(&ts->atomic_command_pipe_count, 1);
         if (prev > 0) {
             // Process command
+            constexpr char kInTrampolineMessage[] = "Process command\n";
+            write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
         } else {
             // Atomic value is now -1, reset to 0
             __sync_fetch_and_add(&ts->atomic_command_pipe_count, 1);
+            break;
         }
     }
 
@@ -66,12 +76,21 @@ extern "C" void _start(int argc, char *argv[]) {
 
     // Init ptrace
 
-    ptrace(PTRACE_TRACEME);
+    // ptrace(PTRACE_TRACEME);
     ts->tracing = true;
 
+    constexpr char kInTrampolineMessage[] = "Tracing\n";
+    write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
+
     // Wait for attach
-    raise(SIGSTOP);
+    ts->latch.RaiseGuest();
+    ts->latch.WaitGuest();
     ts->init = true;
+
+    constexpr char kInTrampolineMessage2[] = "Init\n";
+    write(0, kInTrampolineMessage2, sizeof(kInTrampolineMessage2));
+
+    ts->latch.RaiseGuest();
 
     // Do other initialization here, if needed
 
