@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iterator>
 #include "common/assert.h"
+#include "core/arm/armos/armos.h"
 #include "core/hle/kernel/errors.h"
 #include "core/hle/kernel/vm_manager.h"
 #include "core/memory.h"
@@ -38,6 +39,8 @@ bool VirtualMemoryArea::CanBeMergedWith(const VirtualMemoryArea& next) const {
 
 VMManager::VMManager(Memory::MemorySystem& memory) : memory(memory) {
     Reset();
+
+    page_table.armos_guest = Armos::Guest::SpawnGuest();
 }
 
 VMManager::~VMManager() {

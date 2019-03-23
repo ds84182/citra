@@ -184,7 +184,8 @@ System::ResultStatus System::Init(EmuWindow& emu_window, u32 system_mode) {
 #ifdef ARCHITECTURE_x86_64
         cpu_core = std::make_unique<ARM_Dynarmic>(this, *memory, USER32MODE);
 #else
-        cpu_core = std::make_unique<ARM_DynCom>(this, *memory, USER32MODE);
+        // cpu_core = std::make_unique<ARM_DynCom>(this, *memory, USER32MODE);
+        cpu_core = Armos::MakeCPUInterface(this);
         LOG_WARNING(Core, "CPU JIT requested, but Dynarmic not available");
 #endif
     } else {

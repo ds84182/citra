@@ -31,18 +31,16 @@ static void set_tls(u32 tls) {
 
 template <size_t N>
 static void output(const char (&data)[N]) {
-    write(0, data, N);
+    write(0, data, N - 1);
 }
 
 struct CommandHandler {
     void operator()(Armos::Command::MapMemory *cmd) const {
         output("Command::MapMemory\n");
 
-        // printf("%d %d %d\n", cmd->virt_addr, cmd->size, cmd->shm_offset);
+        printf("%08X %08X %08X\n", cmd->virt_addr, cmd->size, cmd->shm_offset);
 
-        void *res = mmap(reinterpret_cast<void*>(cmd->virt_addr), cmd->size, PROT_READ | PROT_EXEC, MAP_SHARED, Armos::kMainMemSHM, cmd->shm_offset);
-
-        output("Mapped!\n");
+        void *res = mmap(reinterpret_cast<void*>(cmd->virt_addr), cmd->size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, Armos::kMainMemSHM, cmd->shm_offset);
 
         if (res == MAP_FAILED) {
             output("Warning: MapMemory failed\n");
@@ -62,9 +60,6 @@ struct CommandHandler {
 static void trampoline() {
     constexpr char kInTrampolineMessage[] = "In trampoline\n";
     write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
-
-    ts->latch.RaiseGuest();
-    ts->latch.WaitHost();
 
     // While in trampoline, reduce risk of clobbering guest's TLS
     // set_tls(0);
@@ -126,15 +121,19 @@ extern "C" void _start(int argc, char *argv[]) {
     constexpr char kInTrampolineMessage[] = "Tracing\n";
     write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
 
+    raise(SIGSTOP);
+
     // Wait for attach
-    ts->latch.RaiseGuest();
-    ts->latch.WaitGuest();
+    // ts->latch.RaiseGuest();
+    // ts->latch.WaitGuest();
     ts->init = true;
 
     constexpr char kInTrampolineMessage2[] = "Init\n";
     write(0, kInTrampolineMessage2, sizeof(kInTrampolineMessage2));
 
-    ts->latch.RaiseGuest();
+    raise(SIGSTOP);
+
+    // ts->latch.RaiseGuest();
 
     // Do other initialization here, if needed
 

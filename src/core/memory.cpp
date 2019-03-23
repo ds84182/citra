@@ -10,6 +10,7 @@
 #include "common/logging/log.h"
 #include "common/swap.h"
 #include "core/arm/arm_interface.h"
+#include "core/arm/armos/armos.h"
 #include "core/core.h"
 #include "core/hle/kernel/memory.h"
 #include "core/hle/kernel/process.h"
@@ -58,9 +59,12 @@ class MemorySystem::Impl {
 public:
     // Visual Studio would try to allocate these on compile time if they are std::array, which would
     // exceed the memory limit.
-    std::unique_ptr<u8[]> fcram = std::make_unique<u8[]>(Memory::FCRAM_N3DS_SIZE);
-    std::unique_ptr<u8[]> vram = std::make_unique<u8[]>(Memory::VRAM_SIZE);
-    std::unique_ptr<u8[]> n3ds_extra_ram = std::make_unique<u8[]>(Memory::N3DS_EXTRA_RAM_SIZE);
+    // std::unique_ptr<u8[]> fcram = std::make_unique<u8[]>(Memory::FCRAM_N3DS_SIZE);
+    // std::unique_ptr<u8[]> vram = std::make_unique<u8[]>(Memory::VRAM_SIZE);
+    // std::unique_ptr<u8[]> n3ds_extra_ram = std::make_unique<u8[]>(Memory::N3DS_EXTRA_RAM_SIZE);
+    Armos::Region fcram = Armos::AllocateRegion(Memory::FCRAM_N3DS_SIZE);
+    Armos::Region vram = Armos::AllocateRegion(Memory::VRAM_SIZE);
+    Armos::Region n3ds_extra_ram = Armos::AllocateRegion(Memory::N3DS_EXTRA_RAM_SIZE);
 
     PageTable* current_page_table = nullptr;
     RasterizerCacheMarker cache_marker;
@@ -93,6 +97,12 @@ void MemorySystem::MapPages(PageTable& page_table, u32 base, u32 size, u8* memor
 
     RasterizerFlushVirtualRegion(base << PAGE_BITS, size * PAGE_SIZE,
                                  FlushMode::FlushAndInvalidate);
+
+    if (memory) {
+        Armos::Guest::MapMemory(page_table.armos_guest, memory, base * PAGE_SIZE, size * PAGE_SIZE);
+    } else {
+        Armos::Guest::UnmapMemory(page_table.armos_guest, base * PAGE_SIZE, size * PAGE_SIZE);
+    }
 
     u32 end = base + size;
     while (base != end) {
