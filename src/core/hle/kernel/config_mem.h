@@ -55,7 +55,7 @@ public:
     ConfigMemDef& GetConfigMem();
 
 private:
-    ConfigMemDef config_mem;
+    ConfigMemDef* config_mem;
 };
 
 } // namespace ConfigMem
