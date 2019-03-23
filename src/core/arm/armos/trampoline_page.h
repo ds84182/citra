@@ -53,6 +53,24 @@ namespace Command {
         u32 virt_addr;
         u32 size;
     };
+
+    template <typename T>
+    struct Marker {
+        using Type = T;
+    };
+
+    template <typename ...T>
+    struct CommandList {
+        template <typename F>
+        static bool Apply(const F &func, u8 command, size_t size, u8 *base) {
+            return ((command == T::Ordinal && size == sizeof(T) ? func(&reinterpret_cast<Data<T>*>(base)->data),true : false) || ...);
+        }
+    };
+
+    using All = CommandList<
+        MapMemory,
+        UnmapMemory
+    >;
 }
 
 struct Latch {

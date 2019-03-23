@@ -163,6 +163,19 @@ public:
         LOG_ERROR(Core_ARM11, "CONT result: {}", res);
 
         ts->latch.WaitHost();
+        ts->latch.RaiseHost();
+
+        // ts->latch.WaitHost();
+        // ts->latch.RaiseHost();
+
+        WaitUntilStop();
+
+        LOG_ERROR(Core_ARM11, "Got stop");
+
+        res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
+        LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
+
+        WaitUntilTrap();
     }
 
     void CommandMapMemory(u32 shm_offset, u32 virt_addr, u32 size) {
