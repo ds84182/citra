@@ -103,7 +103,7 @@ private:
     Core::TimingEventType* update_time_event;
     std::chrono::seconds init_time;
 
-    SharedPageDef shared_page;
+    SharedPageDef* shared_page;
 };
 
 } // namespace SharedPage
