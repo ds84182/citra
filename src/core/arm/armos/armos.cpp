@@ -14,6 +14,7 @@
 #include "core/arm/arm_interface.h"
 #include "core/arm/armos/trampoline_page.h"
 #include "core/core.h"
+#include "core/core_timing.h"
 #include "core/memory.h"
 #include "core/hle/kernel/svc.h"
 
@@ -33,6 +34,7 @@ private:
     int struct_fd = -1;
     pid_t pid = -1;
     int pipe_fd = -1;
+    bool tls_dirty = false;
 
     TrampolinePage* ts = nullptr;
 
@@ -132,6 +134,8 @@ public:
     }
 
     void EnterTrampoline() {
+        tls_dirty = false;
+
         user_regs regs = {0};
 
         ptrace(
@@ -161,33 +165,23 @@ public:
             &regs
         );
 
-        LOG_ERROR(Core_ARM11, "SETREGS result: {}", res);
-
         res = ptrace(PTRACE_SYSCALL, pid, 0, 0);
-        LOG_ERROR(Core_ARM11, "CONT result: {}", res);
 
         WaitUntilTrap();
-
-        LOG_ERROR(Core_ARM11, "Got trap");
 
         // Coming out of last syscall, just continue
 
         res = ptrace(PTRACE_CONT, pid, 0, 0);
-        LOG_ERROR(Core_ARM11, "CONT result: {}", res);
 
         WaitUntilStop();
 
-        LOG_ERROR(Core_ARM11, "Got stop");
-
         // Enter syscall
         res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
-        LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
 
         WaitUntilTrap();
 
         // Exit syscall
         res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
-        LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
 
         WaitUntilTrap();
     }
@@ -235,7 +229,10 @@ public:
     }
 
     void SetTLS(u32 tls) {
-        ts->guest_tls_addr = tls;
+        if (ts->guest_tls_addr != tls) {
+            ts->guest_tls_addr = tls;
+            tls_dirty = true;
+        }
     }
 
     void CommandMapMemory(u32 shm_offset, u32 virt_addr, u32 size) {
@@ -268,8 +265,6 @@ public:
             &regs
         );
 
-        LOG_WARNING(Core_ARM11, "Syscall PC: {0:#x}", regs.uregs[15]);
-
         // Before Linux executes a garbage syscall, replace it with a different one (getpid)
         ptrace(PTRACE_SET_SYSCALL, pid, 0, SYS_getpid);
 
@@ -289,7 +284,7 @@ public:
     }
 
     bool HasPendingCommands() {
-        return ts->atomic_command_pipe_count;
+        return tls_dirty || ts->atomic_command_pipe_count;
     }
 
 private:
@@ -327,8 +322,6 @@ private:
         while (true) {
             int res = waitpid(pid, &status, 0);
 
-            LOG_ERROR(Core_ARM11, "Status: {}, res {}", status, res);
-
             if (WIFEXITED(status)) {
                 LOG_CRITICAL(Core_ARM11, "Process exited: {}", WEXITSTATUS(status));
                 abort();
@@ -341,7 +334,7 @@ private:
             } else if (sig == SIGCONT) {
                 // ignore
                 int res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
-                LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
+                // LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
             } else {
                 LOG_CRITICAL(Core_ARM11, "Got wrong signal: {}", sig);
 
@@ -365,6 +358,7 @@ private:
                 ptrace(PTRACE_GETSIGINFO, pid, 0, &siginfo);
 
                 LOG_CRITICAL(Core_ARM11, "Fault address: {}", siginfo.si_addr);
+                LOG_CRITICAL(Core_ARM11, "RIP");
 
                 abort();
             }
@@ -598,10 +592,11 @@ public:
     void OnSwi() override {
         u32 instr = system.Memory().Read32(GetPC() - 4);
         Kernel::SVCContext{system}.CallSVC(instr & 0xFFFF);
+        system.CoreTiming().AddTicks(10000);
     }
 
     bool ShouldContinue() override {
-        return !rescheduled;
+        return (!rescheduled) && system.CoreTiming().GetDowncount() > 0;
     }
 
 private:

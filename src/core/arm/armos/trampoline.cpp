@@ -36,7 +36,7 @@ struct CommandHandler {
     void operator()(Armos::Command::MapMemory *cmd) const {
         output("Command::MapMemory\n");
 
-        printf("%08X %08X %08X\n", cmd->virt_addr, cmd->size, cmd->shm_offset);
+        // printf("%08X %08X %08X\n", cmd->virt_addr, cmd->size, cmd->shm_offset);
 
         void *res = mmap(reinterpret_cast<void*>(cmd->virt_addr), cmd->size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, Armos::kMainMemSHM, cmd->shm_offset);
 
