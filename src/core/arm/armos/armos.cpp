@@ -388,7 +388,13 @@ private:
 };
 
 void Armos::Init() {
-    ram_fd_size = Memory::FCRAM_N3DS_SIZE + Memory::VRAM_SIZE + Memory::N3DS_EXTRA_RAM_SIZE + 4096 /* CFG Memory */ + 4096 /* Shared Page */;
+    ram_fd_size =
+        Memory::FCRAM_N3DS_SIZE +
+        Memory::VRAM_SIZE +
+        Memory::N3DS_EXTRA_RAM_SIZE +
+        0x1000 /* CFG Memory */ +
+        0x1000 /* Shared Page */ +
+        Memory::DSP_RAM_SIZE;
     ram_fd = AllocateSharedMemory(ram_fd_size);
     ram_bump_offset = 0;
     ram_mapping = mmap(nullptr, ram_fd_size, PROT_READ | PROT_WRITE, MAP_SHARED, ram_fd, 0);

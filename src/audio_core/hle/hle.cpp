@@ -19,6 +19,7 @@
 #include "common/common_types.h"
 #include "common/hash.h"
 #include "common/logging/log.h"
+#include "core/arm/armos/armos.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 
@@ -62,7 +63,7 @@ private:
     DspState dsp_state = DspState::Off;
     std::array<std::vector<u8>, num_dsp_pipe> pipe_data;
 
-    HLE::DspMemory dsp_memory;
+    HLE::DspMemory* dsp_memory;
     std::array<HLE::Source, HLE::num_sources> sources{{
         HLE::Source(0),  HLE::Source(1),  HLE::Source(2),  HLE::Source(3),  HLE::Source(4),
         HLE::Source(5),  HLE::Source(6),  HLE::Source(7),  HLE::Source(8),  HLE::Source(9),
@@ -81,7 +82,8 @@ private:
 };
 
 DspHle::Impl::Impl(DspHle& parent_, Memory::MemorySystem& memory) : parent(parent_) {
-    dsp_memory.raw_memory.fill(0);
+    dsp_memory = reinterpret_cast<HLE::DspMemory*>(Armos::AllocateRegion(sizeof(HLE::DspMemory)).get());
+    dsp_memory->raw_memory.fill(0);
 
     for (auto& source : sources) {
         source.SetMemory(memory);
@@ -263,7 +265,7 @@ void DspHle::Impl::PipeWrite(DspPipe pipe_number, const std::vector<u8>& buffer)
 }
 
 std::array<u8, Memory::DSP_RAM_SIZE>& DspHle::Impl::GetDspMemory() {
-    return dsp_memory.raw_memory;
+    return dsp_memory->raw_memory;
 }
 
 void DspHle::Impl::SetServiceToInterrupt(std::weak_ptr<DSP_DSP> dsp) {
@@ -322,8 +324,8 @@ void DspHle::Impl::AudioPipeWriteStructAddresses() {
 size_t DspHle::Impl::CurrentRegionIndex() const {
     // The region with the higher frame counter is chosen unless there is wraparound.
     // This function only returns a 0 or 1.
-    const u16 frame_counter_0 = dsp_memory.region_0.frame_counter;
-    const u16 frame_counter_1 = dsp_memory.region_1.frame_counter;
+    const u16 frame_counter_0 = dsp_memory->region_0.frame_counter;
+    const u16 frame_counter_1 = dsp_memory->region_1.frame_counter;
 
     if (frame_counter_0 == 0xFFFFu && frame_counter_1 != 0xFFFEu) {
         // Wraparound has occurred.
@@ -339,11 +341,11 @@ size_t DspHle::Impl::CurrentRegionIndex() const {
 }
 
 HLE::SharedMemory& DspHle::Impl::ReadRegion() {
-    return CurrentRegionIndex() == 0 ? dsp_memory.region_0 : dsp_memory.region_1;
+    return CurrentRegionIndex() == 0 ? dsp_memory->region_0 : dsp_memory->region_1;
 }
 
 HLE::SharedMemory& DspHle::Impl::WriteRegion() {
-    return CurrentRegionIndex() != 0 ? dsp_memory.region_0 : dsp_memory.region_1;
+    return CurrentRegionIndex() != 0 ? dsp_memory->region_0 : dsp_memory->region_1;
 }
 
 StereoFrame16 DspHle::Impl::GenerateCurrentFrame() {
