@@ -420,16 +420,14 @@ void Armos::Guest::DeleteGuest(GuestContext* guest) {
 
 void Armos::Guest::RunGuest(GuestContext* guest, GuestCallbacks* callbacks, std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc) {
     if (guest) {
-        guest->EnterTrampoline();
         while (callbacks->ShouldContinue()) {
+            if (guest->HasPendingCommands()) {
+                guest->EnterTrampoline();
+            }
             guest->SetContext(reg, cpsr, fp_regs, fpscr, fpexc);
             guest->EmulateSyscalls();
             guest->GetContext(reg, cpsr, fp_regs, fpscr, fpexc);
             callbacks->OnSwi();
-
-            if (guest->HasPendingCommands()) {
-                guest->EnterTrampoline();
-            }
         }
     }
 }

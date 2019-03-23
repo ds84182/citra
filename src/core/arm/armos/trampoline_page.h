@@ -5,10 +5,6 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-static long sys_futex(volatile void *addr1, int op, int val1, struct timespec *timeout, void *addr2, int val3) {
-    return syscall(SYS_futex, addr1, op, val1, timeout, addr2, val3);
-}
-
 namespace Armos {
 
 constexpr size_t kTrampolinePageSize = 4096;
@@ -73,38 +69,6 @@ namespace Command {
     >;
 }
 
-struct Latch {
-    volatile int value;
-
-    void RaiseGuest() {
-        WakeGeneric(1);
-    }
-
-    void WaitGuest() {
-        WaitGeneric(2);
-    }
-
-    void RaiseHost() {
-        WakeGeneric(2);
-    }
-
-    void WaitHost() {
-        WaitGeneric(1);
-    }
-
-private:
-    void WaitGeneric(int val) {
-        while (value != val) {
-            sys_futex(&value, FUTEX_WAIT, val, nullptr, nullptr, 0);
-        }
-    }
-
-    void WakeGeneric(int val) {
-        value = val;
-        while (sys_futex(&value, FUTEX_WAKE, 1, nullptr, nullptr, 0) < 0);
-    }
-};
-
 // Please keep the layout of this struct simple!
 // The trampoline binary does not link with libc++
 struct TrampolinePage {
@@ -130,8 +94,6 @@ struct TrampolinePage {
 
     // Number of commands waiting in the command pipe
     volatile s32 atomic_command_pipe_count;
-
-    Latch latch;
 };
 
 

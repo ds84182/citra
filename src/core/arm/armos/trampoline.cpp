@@ -15,8 +15,6 @@ static u8 *ipc_scratch_ram = nullptr;
 
 static void halt() {
     // Ready to go, stop again to allow the host to redirect execution
-    // ts->latch.RaiseGuest();
-    // ts->latch.WaitGuest();
 
     // Go into an infinite loop with a syscall
     raise(SIGSTOP);
@@ -62,7 +60,7 @@ static void trampoline() {
     write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
 
     // While in trampoline, reduce risk of clobbering guest's TLS
-    // set_tls(0);
+    set_tls(0);
 
     // Process command pipe
     while (true) {
@@ -115,25 +113,20 @@ extern "C" void _start(int argc, char *argv[]) {
 
     // Init ptrace
 
-    // ptrace(PTRACE_TRACEME);
     ts->tracing = true;
 
     constexpr char kInTrampolineMessage[] = "Tracing\n";
     write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
 
+    // Wait for attach
     raise(SIGSTOP);
 
-    // Wait for attach
-    // ts->latch.RaiseGuest();
-    // ts->latch.WaitGuest();
     ts->init = true;
 
     constexpr char kInTrampolineMessage2[] = "Init\n";
     write(0, kInTrampolineMessage2, sizeof(kInTrampolineMessage2));
 
     raise(SIGSTOP);
-
-    // ts->latch.RaiseGuest();
 
     // Do other initialization here, if needed
 
