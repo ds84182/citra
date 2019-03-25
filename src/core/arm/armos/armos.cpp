@@ -35,6 +35,13 @@ private:
     pid_t pid = -1;
     int pipe_fd = -1;
     bool tls_dirty = false;
+    bool in_guest = false;
+    bool downcount_alarm_raised = false;
+
+    std::thread downcount_timer_thread;
+    u64 next_downcount_ns = 0;
+    std::condition_variable downcount_cond;
+    std::mutex downcount_mutex;
 
     TrampolinePage* ts = nullptr;
 
@@ -48,6 +55,10 @@ public:
     }
 
     void Init() {
+        downcount_timer_thread = std::thread([=]() {
+            this->DowncountTimerThread();
+        });
+
         struct_fd = AllocateSharedMemory(kTrampolinePageSize);
 
         ts = reinterpret_cast<TrampolinePage*>(mmap(nullptr, kTrampolinePageSize, PROT_READ | PROT_WRITE, MAP_SHARED, struct_fd, 0));
@@ -135,6 +146,9 @@ public:
 
     void EnterTrampoline() {
         tls_dirty = false;
+        in_guest = false;
+
+        DowncountThreadSignal();
 
         user_regs regs = {0};
 
@@ -207,21 +221,31 @@ public:
         memcpy(&vfp_regs.fpregs, &fp_regs, sizeof(u32) * 64);
         vfp_regs.fpscr = fpscr;
 
-        ptrace(PTRACE_SETREGS, pid, 0, &regs);
-        ptrace(PTRACE_SETVFPREGS, pid, 0, &vfp_regs);
+        int res = ptrace(PTRACE_SETREGS, pid, 0, &regs);
+
+        if (res < 0) perror("Failed to PTRACE_SETREGS");
+
+        res = ptrace(PTRACE_SETVFPREGS, pid, 0, &vfp_regs);
+
+        if (res < 0) perror("Failed to PTRACE_SETVFPREGS");
     }
 
-    void GetContext(std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc) {
+    void GetContext(std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc, bool from_swi) {
         user_regs regs = {0};
         user_vfp vfp_regs = {0};
 
-        ptrace(PTRACE_GETREGS, pid, 0, &regs);
-        ptrace(PTRACE_GETVFPREGS, pid, 0, &vfp_regs);
+        int res = ptrace(PTRACE_GETREGS, pid, 0, &regs);
+
+        if (res < 0) perror("Failed to PTRACE_GETREGS");
+
+        res = ptrace(PTRACE_GETVFPREGS, pid, 0, &vfp_regs);
+
+        if (res < 0) perror("Failed to PTRACE_GETVFPREGS");
 
         for (int i=1; i<16; i++) {
             reg[i] = regs.uregs[i];
         }
-        reg[0] = regs.uregs[17];
+        reg[0] = regs.uregs[0];
         cpsr = regs.uregs[16];
 
         memcpy(&fp_regs, &vfp_regs.fpregs, sizeof(u32) * 64);
@@ -233,6 +257,10 @@ public:
             ts->guest_tls_addr = tls;
             tls_dirty = true;
         }
+    }
+
+    void SetDowncount(u32 ns) {
+        next_downcount_ns = ns;
     }
 
     void CommandMapMemory(u32 shm_offset, u32 virt_addr, u32 size) {
@@ -252,9 +280,17 @@ public:
         });
     }
 
-    void EmulateSyscalls() {
+    bool EmulateSyscalls() {
+        in_guest = true;
+        downcount_alarm_raised = false;
+        DowncountThreadSignal();
+
         CaptureNextSyscall();
         WaitUntilTrap();
+
+        if (downcount_alarm_raised) {
+            return false;
+        }
 
         user_regs regs = {0};
 
@@ -271,6 +307,10 @@ public:
         CaptureNextSyscall();
         WaitUntilTrap();
 
+        if (downcount_alarm_raised) {
+            LOG_CRITICAL(Core_ARM11, "Bad downcount alarm timing (inbetween syscall boundary)");
+        }
+
         // Now after the call to getpid
 
         // Recover the registers from before the syscall
@@ -281,10 +321,16 @@ public:
             0,
             &regs
         );
+
+        return true;
     }
 
     bool HasPendingCommands() {
         return tls_dirty || ts->atomic_command_pipe_count;
+    }
+
+    void SignalDowncountAlarm() {
+        kill(pid, SIGALRM);
     }
 
 private:
@@ -307,7 +353,7 @@ private:
 
             if (sig == SIGSTOP) {
                 break;
-            } else if (sig == SIGTRAP || sig == SIGCONT) {
+            } else if (sig == SIGTRAP || sig == SIGCONT || sig == SIGALRM) {
                 // Ignore
                 ptrace(PTRACE_CONT, pid, 0, 0);
             } else {
@@ -335,6 +381,15 @@ private:
                 // ignore
                 int res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
                 // LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
+            } else if (sig == SIGALRM) {
+                if (in_guest) {
+                    // Downcount alarm hit, return
+                    downcount_alarm_raised = true;
+                    break;
+                } else {
+                    // Ignore
+                    ptrace(PTRACE_SYSCALL, pid, 0, 0);
+                }
             } else {
                 LOG_CRITICAL(Core_ARM11, "Got wrong signal: {}", sig);
 
@@ -342,13 +397,14 @@ private:
                 u32 cpsr;
                 std::array<u32, 64> fp_regs;
                 u32 fpscr, fpexc;
-                GetContext(reg, cpsr, fp_regs, fpscr, fpexc);
+                GetContext(reg, cpsr, fp_regs, fpscr, fpexc, true);
 
                 LOG_CRITICAL(Core_ARM11, "R0: {}", reg[0]);
                 LOG_CRITICAL(Core_ARM11, "R1: {}", reg[1]);
                 LOG_CRITICAL(Core_ARM11, "R2: {}", reg[2]);
                 LOG_CRITICAL(Core_ARM11, "R3: {}", reg[3]);
                 LOG_CRITICAL(Core_ARM11, "R4: {}", reg[4]);
+                LOG_CRITICAL(Core_ARM11, "R12: {}", reg[12]);
 
                 LOG_CRITICAL(Core_ARM11, "PC: {}", reg[15]);
                 LOG_CRITICAL(Core_ARM11, "LR: {}", reg[14]);
@@ -378,6 +434,32 @@ private:
         auto dat = T::IntoData(data);
         SendCommandRaw(reinterpret_cast<void*>(&dat), sizeof(decltype(dat)));
         __sync_fetch_and_add(&ts->atomic_command_pipe_count, 1);
+    }
+
+    void DowncountThreadSignal() {
+        std::unique_lock<std::mutex> downcount_lock(downcount_mutex);
+        downcount_cond.notify_one();
+    }
+
+    void DowncountTimerThread() {
+        while (true) {
+            // Wait for guest entry
+            std::unique_lock<std::mutex> downcount_lock(downcount_mutex);
+
+            downcount_cond.wait(downcount_lock, [=]() {
+                return in_guest && !downcount_alarm_raised;
+            });
+
+            // Guest code is now running, wait for timeout or guest exit
+            downcount_cond.wait_for(downcount_lock, std::chrono::nanoseconds(next_downcount_ns), [=]() {
+                return !in_guest;
+            });
+
+            if (in_guest) {
+                // If the guest is still running after timeout, raise the alarm
+                SignalDowncountAlarm();
+            }
+        }
     }
 };
 
@@ -420,14 +502,21 @@ void Armos::Guest::DeleteGuest(GuestContext* guest) {
 
 void Armos::Guest::RunGuest(GuestContext* guest, GuestCallbacks* callbacks, std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc) {
     if (guest) {
+        guest->SetDowncount(callbacks->GetDowncountNanos() * 1024);
         while (callbacks->ShouldContinue()) {
             if (guest->HasPendingCommands()) {
                 guest->EnterTrampoline();
             }
             guest->SetContext(reg, cpsr, fp_regs, fpscr, fpexc);
-            guest->EmulateSyscalls();
-            guest->GetContext(reg, cpsr, fp_regs, fpscr, fpexc);
-            callbacks->OnSwi();
+            bool swi = guest->EmulateSyscalls();
+            guest->GetContext(reg, cpsr, fp_regs, fpscr, fpexc, swi);
+            if (swi) {
+                callbacks->OnSwi();
+            } else {
+                // Downcount alarm raised
+                callbacks->ClearDowncount();
+                break;
+            }
         }
     }
 }
@@ -592,11 +681,18 @@ public:
     void OnSwi() override {
         u32 instr = system.Memory().Read32(GetPC() - 4);
         Kernel::SVCContext{system}.CallSVC(instr & 0xFFFF);
-        system.CoreTiming().AddTicks(10000);
     }
 
     bool ShouldContinue() override {
         return (!rescheduled) && system.CoreTiming().GetDowncount() > 0;
+    }
+
+    u32 GetDowncountNanos() override {
+        return cyclesToNs(system.CoreTiming().GetDowncount());
+    }
+
+    void ClearDowncount() override {
+        system.CoreTiming().AddTicks(system.CoreTiming().GetDowncount());
     }
 
 private:

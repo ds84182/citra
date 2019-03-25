@@ -1,4 +1,7 @@
+#include "limits.h"
+#define LONG_BIT (8 * sizeof(long))
 #include <signal.h>
+#include <time.h>
 
 #include <sys/mman.h>
 #include <sys/ptrace.h>

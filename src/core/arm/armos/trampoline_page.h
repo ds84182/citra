@@ -94,6 +94,8 @@ struct TrampolinePage {
 
     // Number of commands waiting in the command pipe
     volatile s32 atomic_command_pipe_count;
+
+    u32 downcount_ns;
 };
 
 

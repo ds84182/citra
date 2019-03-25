@@ -15,6 +15,8 @@ namespace Armos {
     public:
         virtual void OnSwi() = 0;
         virtual bool ShouldContinue() = 0;
+        virtual u32 GetDowncountNanos() = 0;
+        virtual void ClearDowncount() = 0;
     };
 
     void Init();
