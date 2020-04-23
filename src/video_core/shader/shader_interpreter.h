@@ -4,13 +4,22 @@
 
 #pragma once
 
+#include <unordered_map>
+
 #include "video_core/shader/debug_data.h"
 #include "video_core/shader/shader.h"
 
 namespace Pica::Shader {
 
+namespace Fast {
+class CachedBatch;
+}
+
 class InterpreterEngine final : public ShaderEngine {
 public:
+    InterpreterEngine();
+    ~InterpreterEngine() override;
+
     void SetupBatch(ShaderSetup& setup, unsigned int entry_point) override;
     void Run(const ShaderSetup& setup, UnitState& state) const override;
 
@@ -23,6 +32,8 @@ public:
      */
     DebugData<true> ProduceDebugInfo(const ShaderSetup& setup, const AttributeBuffer& input,
                                      const ShaderRegs& config) const;
+private:
+    std::unordered_map<u64, std::unique_ptr<Fast::CachedBatch>> cache;
 };
 
 } // namespace Pica::Shader

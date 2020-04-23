@@ -51,6 +51,8 @@ add_library(video_core STATIC
     shader/shader.h
     shader/shader_interpreter.cpp
     shader/shader_interpreter.h
+    shader/shader_fast_interpreter.cpp
+    shader/shader_fast_interpreter.h
     swrasterizer/clipper.cpp
     swrasterizer/clipper.h
     swrasterizer/framebuffer.cpp

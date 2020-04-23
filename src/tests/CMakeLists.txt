@@ -27,3 +27,12 @@ target_link_libraries(tests PRIVATE common core video_core audio_core)
 target_link_libraries(tests PRIVATE ${PLATFORM_LIBRARIES} catch-single-include nihstro-headers Threads::Threads)
 
 add_test(NAME tests COMMAND tests)
+
+add_executable(shader_fast_tests
+    video_core/shader/shader_fast_interpreter.cpp
+    tests.cpp
+)
+
+target_link_libraries(shader_fast_tests PRIVATE common core video_core)
+target_link_libraries(shader_fast_tests PRIVATE ${PLATFORM_LIBRARIES} catch-single-include nihstro-headers Threads::Threads)
+add_test(NAME shader_fast_tests COMMAND shader_fast_tests)

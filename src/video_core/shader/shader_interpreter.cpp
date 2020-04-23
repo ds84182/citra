@@ -6,6 +6,8 @@
 #include <array>
 #include <cmath>
 #include <numeric>
+#include <memory>
+#include <vector>
 #include <boost/container/static_vector.hpp>
 #include <boost/range/algorithm/fill.hpp>
 #include <nihstro/shader_bytecode.h>
@@ -18,6 +20,7 @@
 #include "video_core/pica_types.h"
 #include "video_core/shader/shader.h"
 #include "video_core/shader/shader_interpreter.h"
+#include "video_core/shader/shader_fast_interpreter.h"
 
 using nihstro::Instruction;
 using nihstro::OpCode;
@@ -666,9 +669,34 @@ static void RunInterpreter(const ShaderSetup& setup, UnitState& state, DebugData
     }
 }
 
+InterpreterEngine::InterpreterEngine() = default;
+InterpreterEngine::~InterpreterEngine() = default;
+
+using CachedBatch = Fast::CachedBatch;
+
 void InterpreterEngine::SetupBatch(ShaderSetup& setup, unsigned int entry_point) {
     ASSERT(entry_point < MAX_PROGRAM_CODE_LENGTH);
     setup.engine_data.entry_point = entry_point;
+
+    u64 code_hash = setup.GetProgramCodeHash();
+    u64 swizzle_hash = setup.GetSwizzleDataHash();
+
+    u64 cache_key = code_hash ^ swizzle_hash;
+    auto iter = cache.find(cache_key);
+    if (iter != cache.end()) {
+        setup.engine_data.cached_shader = iter->second.get();
+    } else {
+        auto shader = std::make_unique<CachedBatch>(cache_key);
+        setup.engine_data.cached_shader = shader.get();
+        cache.emplace_hint(iter, cache_key, std::move(shader));
+
+        // TODO: Move compilation into SetupBatch proper once we stop depending on absolute addresses
+        // if (shader->Compile(&setup.program_code, &setup.swizzle_data)) {
+        // } else {
+        //     // Compile failed!
+        //     cache.emplace_hint(iter, cache_key, nullptr);
+        // }
+    }
 }
 
 MICROPROFILE_DECLARE(GPU_Shader);
@@ -676,6 +704,19 @@ MICROPROFILE_DECLARE(GPU_Shader);
 void InterpreterEngine::Run(const ShaderSetup& setup, UnitState& state) const {
 
     MICROPROFILE_SCOPE(GPU_Shader);
+
+    if (setup.engine_data.cached_shader) {
+        auto batch = const_cast<CachedBatch*>(static_cast<const CachedBatch*>(setup.engine_data.cached_shader));
+
+        if (!batch->IsCompiled() && !batch->Compile(setup, state)) {
+            LOG_WARNING(HW_GPU, "Failed to compile shader");
+            const_cast<ShaderSetup&>(setup).engine_data.cached_shader = nullptr;
+            const_cast<std::remove_const_t<decltype(cache)>&>(cache).insert(batch->Key(), nullptr);
+        } else {
+            batch->Run(setup, state, setup.engine_data.entry_point);
+            return;
+        }
+    }
 
     DebugData<false> dummy_debug_data;
     RunInterpreter(setup, state, dummy_debug_data, setup.engine_data.entry_point);

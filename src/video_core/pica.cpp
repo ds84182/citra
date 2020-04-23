@@ -50,5 +50,8 @@ void State::Reset() {
     Zero(cmd_list);
     Zero(immediate);
     primitive_assembler.Reconfigure(PipelineRegs::TriangleTopology::List);
+
+    vs.program_code.fill(0x87000000); // NOP
+    gs.program_code.fill(0x87000000); // NOP
 }
 } // namespace Pica

@@ -137,7 +137,7 @@ MICROPROFILE_DEFINE(GPU_Shader, "GPU", "Shader", MP_RGB(50, 50, 240));
 #ifdef ARCHITECTURE_x86_64
 static std::unique_ptr<JitX64Engine> jit_engine;
 #endif // ARCHITECTURE_x86_64
-static InterpreterEngine interpreter_engine;
+static std::unique_ptr<InterpreterEngine> interpreter_engine;
 
 ShaderEngine* GetEngine() {
 #ifdef ARCHITECTURE_x86_64
@@ -150,13 +150,18 @@ ShaderEngine* GetEngine() {
     }
 #endif // ARCHITECTURE_x86_64
 
-    return &interpreter_engine;
+    if (!interpreter_engine) {
+        interpreter_engine = std::make_unique<InterpreterEngine>();
+    }
+
+    return interpreter_engine.get();
 }
 
 void Shutdown() {
 #ifdef ARCHITECTURE_x86_64
     jit_engine = nullptr;
 #endif // ARCHITECTURE_x86_64
+    interpreter_engine = nullptr;
 }
 
 } // namespace Pica::Shader
