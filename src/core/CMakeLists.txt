@@ -469,4 +469,5 @@ add_executable(libarmos_trampoline.so
 set_target_properties(libarmos_trampoline.so PROPERTIES COMPILE_FLAGS "-ffreestanding -fno-stack-protector")
 set_target_properties(libarmos_trampoline.so PROPERTIES LINK_FLAGS "-nostartfiles")
 set_target_properties(libarmos_trampoline.so PROPERTIES LINKER_LANGUAGE C)
+target_link_libraries(libarmos_trampoline.so "rt")
 add_dependencies(core libarmos_trampoline.so)

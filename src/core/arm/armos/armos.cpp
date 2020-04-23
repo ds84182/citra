@@ -37,6 +37,7 @@ private:
     bool tls_dirty = false;
     bool in_guest = false;
     bool downcount_alarm_raised = false;
+    bool guest_fault = false;
 
     std::thread downcount_timer_thread;
     u64 next_downcount_ns = 0;
@@ -179,25 +180,15 @@ public:
             &regs
         );
 
-        res = ptrace(PTRACE_SYSCALL, pid, 0, 0);
-
-        WaitUntilTrap();
-
         // Coming out of last syscall, just continue
+        auto init_status = __sync_fetch_and_add(&ts->trampoline_status, 0);
+        int new_status = init_status;
 
-        res = ptrace(PTRACE_CONT, pid, 0, 0);
+        while (init_status == (new_status = __sync_fetch_and_add(&ts->trampoline_status, 0))) {
+            res = ptrace(PTRACE_CONT, pid, 0, 0);
 
-        WaitUntilStop();
-
-        // Enter syscall
-        res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
-
-        WaitUntilTrap();
-
-        // Exit syscall
-        res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
-
-        WaitUntilTrap();
+            WaitUntilStop();
+        }
     }
 
     // Sometimes not declared in user.h
@@ -280,7 +271,21 @@ public:
         });
     }
 
-    bool EmulateSyscalls() {
+    void CommandTrapMemory(u32 virt_addr, u32 size) {
+        SendCommand(Command::TrapMemory {
+            {},
+            virt_addr,
+            size
+        });
+    }
+
+    enum class SyscallResult {
+        Syscall,
+        DowncountAlarm,
+        GuestFault
+    };
+
+    SyscallResult EmulateSyscalls() {
         in_guest = true;
         downcount_alarm_raised = false;
         DowncountThreadSignal();
@@ -288,8 +293,17 @@ public:
         CaptureNextSyscall();
         WaitUntilTrap();
 
+        // Disable downcount alarm and other code that triggers while executing guest code.
+        // We need fine tuned control of the code below.
+        in_guest = false;
+        DowncountThreadSignal();
+
         if (downcount_alarm_raised) {
-            return false;
+            return SyscallResult::DowncountAlarm;
+        }
+
+        if (guest_fault) {
+            return SyscallResult::GuestFault;
         }
 
         user_regs regs = {0};
@@ -302,13 +316,17 @@ public:
         );
 
         // Before Linux executes a garbage syscall, replace it with a different one (getpid)
-        ptrace(PTRACE_SET_SYSCALL, pid, 0, SYS_getpid);
+        ptrace(PTRACE_SET_SYSCALL, pid, 0, -1);
 
         CaptureNextSyscall();
         WaitUntilTrap();
 
         if (downcount_alarm_raised) {
             LOG_CRITICAL(Core_ARM11, "Bad downcount alarm timing (inbetween syscall boundary)");
+        }
+
+        if (guest_fault) {
+            LOG_CRITICAL(Core_ARM11, "Guest fault occurred during getpid (?)");
         }
 
         // Now after the call to getpid
@@ -322,7 +340,7 @@ public:
             &regs
         );
 
-        return true;
+        return SyscallResult::Syscall;
     }
 
     bool HasPendingCommands() {
@@ -330,7 +348,7 @@ public:
     }
 
     void SignalDowncountAlarm() {
-        kill(pid, SIGALRM);
+        kill(pid, SIGSTOP);
     }
 
 private:
@@ -379,9 +397,9 @@ private:
                 break;
             } else if (sig == SIGCONT) {
                 // ignore
-                int res = ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
+                int res = ptrace(PTRACE_SYSCALL, pid, 0, 0);
                 // LOG_ERROR(Core_ARM11, "SYSCALL result: {}", res);
-            } else if (sig == SIGALRM) {
+            } else if (sig == SIGSTOP) {
                 if (in_guest) {
                     // Downcount alarm hit, return
                     downcount_alarm_raised = true;
@@ -390,39 +408,68 @@ private:
                     // Ignore
                     ptrace(PTRACE_SYSCALL, pid, 0, 0);
                 }
-            } else {
-                LOG_CRITICAL(Core_ARM11, "Got wrong signal: {}", sig);
-
-                std::array<u32, 16> reg;
-                u32 cpsr;
-                std::array<u32, 64> fp_regs;
-                u32 fpscr, fpexc;
-                GetContext(reg, cpsr, fp_regs, fpscr, fpexc, true);
-
-                LOG_CRITICAL(Core_ARM11, "R0: {}", reg[0]);
-                LOG_CRITICAL(Core_ARM11, "R1: {}", reg[1]);
-                LOG_CRITICAL(Core_ARM11, "R2: {}", reg[2]);
-                LOG_CRITICAL(Core_ARM11, "R3: {}", reg[3]);
-                LOG_CRITICAL(Core_ARM11, "R4: {}", reg[4]);
-                LOG_CRITICAL(Core_ARM11, "R12: {}", reg[12]);
-
-                LOG_CRITICAL(Core_ARM11, "PC: {}", reg[15]);
-                LOG_CRITICAL(Core_ARM11, "LR: {}", reg[14]);
-                LOG_CRITICAL(Core_ARM11, "SP: {}", reg[13]);
-
+            } else if (sig == SIGSEGV && in_guest) {
                 siginfo_t siginfo;
                 ptrace(PTRACE_GETSIGINFO, pid, 0, &siginfo);
 
-                LOG_CRITICAL(Core_ARM11, "Fault address: {}", siginfo.si_addr);
+                guest_fault = true;
+                break;
+            } else {
+                LOG_CRITICAL(Core_ARM11, "Got wrong signal: {}", sig);
+
+                DumpRegisters();
+
+                DumpFaultAddress();
                 LOG_CRITICAL(Core_ARM11, "RIP");
 
-                abort();
+                LOG_CRITICAL(Core_ARM11, "PID: {}", pid);
+
+                kill(pid, SIGSTOP);
+                ptrace(PTRACE_DETACH, pid, 0, SIGSTOP);
+
+                auto pidstr = std::to_string(pid);
+
+                char *const argv[] = {
+                    "gdb",
+                    "-p",
+                    &pidstr[0],
+                    nullptr
+                };
+
+                execv("/usr/bin/gdb", argv);
             }
         }
     }
 
+    void DumpRegisters() {
+        std::array<u32, 16> reg;
+        u32 cpsr;
+        std::array<u32, 64> fp_regs;
+        u32 fpscr, fpexc;
+        GetContext(reg, cpsr, fp_regs, fpscr, fpexc, true);
+
+        LOG_CRITICAL(Core_ARM11, "R0: {}", reg[0]);
+        LOG_CRITICAL(Core_ARM11, "R1: {}", reg[1]);
+        LOG_CRITICAL(Core_ARM11, "R2: {}", reg[2]);
+        LOG_CRITICAL(Core_ARM11, "R3: {}", reg[3]);
+        LOG_CRITICAL(Core_ARM11, "R4: {}", reg[4]);
+        LOG_CRITICAL(Core_ARM11, "R12: {}", reg[12]);
+
+        LOG_CRITICAL(Core_ARM11, "PC: {}", reg[15]);
+        LOG_CRITICAL(Core_ARM11, "LR: {}", reg[14]);
+        LOG_CRITICAL(Core_ARM11, "SP: {}", reg[13]);
+    }
+
+    void DumpFaultAddress() {
+        siginfo_t siginfo;
+        ptrace(PTRACE_GETSIGINFO, pid, 0, &siginfo);
+
+        LOG_CRITICAL(Core_ARM11, "Fault address: {}", siginfo.si_addr);
+    }
+
     void CaptureNextSyscall() {
-        ptrace(PTRACE_SYSCALL, pid, 0, 0);
+        // TODO: Only send SIGCONT during a signal stop?
+        ptrace(PTRACE_SYSCALL, pid, 0, SIGCONT);
     }
 
     void SendCommandRaw(void* data, size_t size) {
@@ -458,6 +505,11 @@ private:
             if (in_guest) {
                 // If the guest is still running after timeout, raise the alarm
                 SignalDowncountAlarm();
+
+                // Wait for guest exit.
+                downcount_cond.wait(downcount_lock, [=]() {
+                    return !in_guest;
+                });
             }
         }
     }
@@ -502,20 +554,28 @@ void Armos::Guest::DeleteGuest(GuestContext* guest) {
 
 void Armos::Guest::RunGuest(GuestContext* guest, GuestCallbacks* callbacks, std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc) {
     if (guest) {
-        guest->SetDowncount(callbacks->GetDowncountNanos() * 1024);
+        guest->SetDowncount(callbacks->GetDowncountNanos());
         while (callbacks->ShouldContinue()) {
             if (guest->HasPendingCommands()) {
                 guest->EnterTrampoline();
             }
+
             guest->SetContext(reg, cpsr, fp_regs, fpscr, fpexc);
-            bool swi = guest->EmulateSyscalls();
-            guest->GetContext(reg, cpsr, fp_regs, fpscr, fpexc, swi);
-            if (swi) {
+            auto res = guest->EmulateSyscalls();
+            guest->GetContext(reg, cpsr, fp_regs, fpscr, fpexc, res == GuestContext::SyscallResult::Syscall);
+
+            switch (res) {
+            case GuestContext::SyscallResult::Syscall:
+                callbacks->ClearDowncount();
                 callbacks->OnSwi();
-            } else {
-                // Downcount alarm raised
+                break;
+            case GuestContext::SyscallResult::DowncountAlarm:
                 callbacks->ClearDowncount();
                 break;
+            case GuestContext::SyscallResult::GuestFault:
+                break;
+            default:
+                UNREACHABLE();
             }
         }
     }
@@ -530,6 +590,12 @@ void Armos::Guest::MapMemory(GuestContext* guest, void* memory, u32 virt_addr, u
 void Armos::Guest::UnmapMemory(GuestContext* guest, u32 virt_addr, u32 size) {
     if (guest) {
         guest->CommandUnmapMemory(virt_addr, size);
+    }
+}
+
+void Armos::Guest::TrapMemory(GuestContext* guest, u32 virt_addr, u32 size) {
+    if (guest) {
+        guest->CommandTrapMemory(virt_addr, size);
     }
 }
 

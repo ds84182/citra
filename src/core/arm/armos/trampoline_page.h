@@ -50,9 +50,9 @@ namespace Command {
         u32 size;
     };
 
-    template <typename T>
-    struct Marker {
-        using Type = T;
+    struct TrapMemory : Base<2, TrapMemory> {
+        u32 virt_addr;
+        u32 size;
     };
 
     template <typename ...T>
@@ -65,7 +65,8 @@ namespace Command {
 
     using All = CommandList<
         MapMemory,
-        UnmapMemory
+        UnmapMemory,
+        TrapMemory
     >;
 }
 
@@ -96,6 +97,9 @@ struct TrampolinePage {
     volatile s32 atomic_command_pipe_count;
 
     u32 downcount_ns;
+
+    // Status of the trampoline, incremented on enter and exit.
+    u32 trampoline_status;
 };
 
 

@@ -20,9 +20,9 @@ static void halt() {
     // Ready to go, stop again to allow the host to redirect execution
 
     // Go into an infinite loop with a syscall
+    // constexpr char kInTrampolineMessage[] = "Waiting for syscall capture\n";
+    // write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
     raise(SIGSTOP);
-    constexpr char kInTrampolineMessage[] = "Waiting for syscall capture\n";
-    write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
     while (true) raise(SIGCHLD);
 }
 
@@ -43,6 +43,8 @@ struct CommandHandler {
 
         void *res = mmap(reinterpret_cast<void*>(cmd->virt_addr), cmd->size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED, Armos::kMainMemSHM, cmd->shm_offset);
 
+        __builtin___clear_cache(res, res + cmd->size);
+
         if (res == MAP_FAILED) {
             output("Warning: MapMemory failed\n");
         }
@@ -56,14 +58,24 @@ struct CommandHandler {
             output("Warning: UnmapMemory failed\n");
         }
     }
+
+    void operator()(Armos::Command::TrapMemory *cmd) const {
+        output("Command::TrapMemory\n");
+
+        // int res = mprotect(reinterpret_cast<void*>(cmd->virt_addr), cmd->size, PROT_NONE);
+        // if (res < 0) {
+        //     output("Warning: TrapMemory failed\n");
+        // }
+    }
 };
 
 static void trampoline() {
-    constexpr char kInTrampolineMessage[] = "In trampoline\n";
-    write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
+    // constexpr char kInTrampolineMessage[] = "In trampoline\n";
+    // write(0, kInTrampolineMessage, sizeof(kInTrampolineMessage));
 
     // While in trampoline, reduce risk of clobbering guest's TLS
     set_tls(0);
+    __sync_fetch_and_add(&ts->trampoline_status, 1);
 
     // Process command pipe
     while (true) {
@@ -101,6 +113,7 @@ static void trampoline() {
 
     // Enter guest
     set_tls(ts->guest_tls_addr);
+    __sync_fetch_and_add(&ts->trampoline_status, 1);
     halt();
 }
 
@@ -113,6 +126,10 @@ extern "C" void _start(int argc, char *argv[]) {
     ts->trampoline_stack = static_cast<u32>(reinterpret_cast<uintptr_t>(mmap(nullptr, Armos::kTrampolineStackSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0)));
 
     ipc_scratch_ram = reinterpret_cast<u8*>(mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+
+    sigset_t set;
+    sigfillset(&set);
+    sigprocmask(SIG_UNBLOCK, &set, nullptr);
 
     // Init ptrace
 

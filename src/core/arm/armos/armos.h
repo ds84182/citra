@@ -44,6 +44,7 @@ namespace Armos {
         void RunGuest(GuestContext* guest, GuestCallbacks* callbacks, std::array<u32, 16>& reg, u32& cpsr, std::array<u32, 64>& fp_regs, u32& fpscr, u32& fpexc);
         void MapMemory(GuestContext* guest, void* memory, u32 virt_addr, u32 size);
         void UnmapMemory(GuestContext* guest, u32 virt_addr, u32 size);
+        void TrapMemory(GuestContext* guest, u32 virt_addr, u32 size);
     }
 
     std::unique_ptr<ARM_Interface> MakeCPUInterface(Core::System* system);
