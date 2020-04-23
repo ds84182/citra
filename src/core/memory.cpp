@@ -115,6 +115,8 @@ void MemorySystem::MapPages(PageTable& page_table, u32 base, u32 size, u8* memor
         if (type == PageType::Memory && impl->cache_marker.IsCached(base * PAGE_SIZE)) {
             page_table.attributes[base] = PageType::RasterizerCachedMemory;
             page_table.pointers[base] = nullptr;
+
+            Armos::Guest::TrapMemory(page_table.armos_guest, base * PAGE_SIZE, PAGE_SIZE);
         }
 
         base += 1;
@@ -393,6 +395,7 @@ void MemorySystem::RasterizerMarkRegionCached(PAddr start, u32 size, bool cached
                     case PageType::Memory:
                         page_type = PageType::RasterizerCachedMemory;
                         page_table->pointers[vaddr >> PAGE_BITS] = nullptr;
+                        Armos::Guest::TrapMemory(page_table->armos_guest, vaddr, PAGE_SIZE);
                         break;
                     default:
                         UNREACHABLE();
@@ -408,6 +411,7 @@ void MemorySystem::RasterizerMarkRegionCached(PAddr start, u32 size, bool cached
                         page_type = PageType::Memory;
                         page_table->pointers[vaddr >> PAGE_BITS] =
                             GetPointerForRasterizerCache(vaddr & ~PAGE_MASK);
+                        // Armos::Guest::RestoreMemory(page_table->armos_guest, vaddr, PAGE_SIZE);
                         break;
                     }
                     default:
